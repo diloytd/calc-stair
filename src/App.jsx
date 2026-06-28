@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { create } from 'zustand';
 import ExportPanel from './ExportPanel.jsx';
 import Staircase3D from './Staircase3D.jsx';
+import { generateComponents } from './stairComponents.js';
+import {
+  getFlightCount,
+  getFloorCount,
+  getMaxStepsPerFlight,
+  getTotalRise,
+  resolveFlightStepsList,
+} from './stairFlightPlan.js';
 
 const SHAPES = [
   { value: 'straight', label: 'Прямая одномаршевая' },
   { value: 'l-platform', label: 'Г-образная с площадкой' },
-  { value: 'l-winder', label: 'Г-образная с забежными ступенями' },
   { value: 'u-platform', label: 'П-образная с площадкой' },
-  { value: 'u-winder', label: 'П-образная с забежными ступенями' },
-  { value: 'winder-90', label: 'Забежные ступени, поворот 90°' },
-  { value: 'winder-180', label: 'Забежные ступени, поворот 180°' },
   { value: 'spiral', label: 'Винтовая (спиральная)' },
 ];
 
@@ -26,7 +31,8 @@ const PARAMETER_HINTS = {
   flightLength: 'Горизонтальная длина одного марша. Прямой нормы нет: значение определяется глубиной ступени и количеством подъемов.',
   form: 'Конструктивная схема лестницы. Выбор формы влияет на проверки по СП 55.13330.2016, ГОСТ 9818-2015 и СП 1.13130.2020.',
   headroom: 'Свободная высота над лестницей в зоне прохода. Ориентир по СП 55.13330.2016 — не менее 2000 мм.',
-  height: 'Общая высота между чистым полом нижнего и верхнего этажей. Нормативного рекомендуемого значения нет: это исходный размер здания.',
+  height: 'Высота одного этажа между чистыми полами соседних уровней. Для многоэтажной лестницы общий подъём = H × (этажей − 1).',
+  floors: 'Количество этажей здания (от 2 до 3). Лестница строится от нижнего до верхнего уровня с промежуточными площадками между этажами.',
   material: 'Основной материал несущей конструкции лестницы. Требования к конструкциям учитываются по ГОСТ 9818-2015 и профильным нормам.',
   openingLength: 'Сколько места по полу есть под лестницу в длину. Это расстояние от начала лестницы до места, где она должна прийти к верхнему этажу, если смотреть сверху. Чем меньше значение, тем круче лестница; чем больше — тем глубже и удобнее ступени.',
   planSize: 'Габариты лестницы на виде сверху. Прямой нормы нет: размер должен помещаться в проем и сохранять нормативную ширину марша.',
@@ -35,24 +41,30 @@ const PARAMETER_HINTS = {
   slopeAngle: 'Угол наклона лестницы относительно пола. Рекомендуемый диапазон для маршевой лестницы — 30-40°, для винтовой — 25-35°.',
   steps: 'Количество подъемов от нижнего до верхнего уровня. По ГОСТ 9818-2015 для марша используется диапазон 3-18 подъемов.',
   stringerThickness: 'Толщина боковой несущей балки (тетивы или косоура).',
-  tread: 'Расчетная глубина ступени в зоне постановки стопы. Ориентир: марш 260-300 мм, забежные по линии хода 200-250 мм, узкий край не менее 100 мм.',
+  tread: 'Расчетная глубина ступени в зоне постановки стопы. Ориентир для марша: 260-300 мм.',
   treadOverhang: 'Нависание проступи над подступенком. Рекомендуется не более 50 мм.',
   treadThickness: 'Толщина доски или плиты ступени. Влияет на расход материала.',
   landingLength: 'Габарит промежуточной площадки по направлению движения. По умолчанию равен ширине марша.',
   firstFlightSteps: 'Количество подъемов до первого поворота или площадки. Остальные марши считаются от общего n.',
-  secondFlightSteps: 'Количество подъемов между двумя поворотами П-образной лестницы.',
-  thirdFlightSteps: 'Остаток подъемов после первого и второго марша: n минус введенные марши.',
-  winderSteps: 'Количество забежных ступеней на повороте. Для 90° обычно используют 3-5 ступеней.',
-  firstTurnWinderSteps: 'Количество забежных ступеней в первом повороте П-образной лестницы.',
-  secondTurnWinderSteps: 'Количество забежных ступеней во втором повороте П-образной лестницы.',
-  turnRadius: 'Радиус поворота по средней линии движения. По умолчанию равен ширине марша.',
+  secondFlightSteps: 'Остаток подъемов после 1-го марша: n минус введенный первый марш.',
   outerRadius: 'Внешний радиус винтовой лестницы от центра стойки до наружного края ступени.',
   innerRadius: 'Внутренний радиус винтовой лестницы или радиус центральной стойки.',
   spiralStepsPerTurn: 'Количество ступеней на один полный оборот винтовой лестницы.',
 };
 
+const RESULT_TABS = [
+  { id: 'input-parameters', label: 'Ввод параметров' },
+  { id: 'side-view', label: 'Вид сбоку' },
+  { id: 'top-view', label: 'Вид сверху' },
+  { id: 'three-d', label: '3D-визуализация' },
+  { id: 'parameters', label: 'Параметры' },
+  { id: 'checks', label: 'Проверки' },
+  { id: 'export', label: 'Экспорт' },
+];
+
 const INITIAL_FORM = {
   height: 3000,
+  floors: 3,
   flightWidth: 900,
   openingLength: 4200,
   useAutoSteps: true,
@@ -65,10 +77,6 @@ const INITIAL_FORM = {
   landingLength: 900,
   firstFlightSteps: 8,
   secondFlightSteps: 4,
-  firstTurnWinderSteps: 3,
-  secondTurnWinderSteps: 3,
-  winderSteps: 3,
-  turnRadius: 900,
   outerRadius: 1000,
   innerRadius: 200,
   spiralStepsPerTurn: 12,
@@ -114,13 +122,6 @@ const formatNumber = (value, digits = 0) => {
 const isBetween = (value, min, max) => value >= min && value <= max;
 
 /**
- * Определяет, относится ли форма лестницы к лестницам с забежными ступенями.
- * @param {string} shape - Идентификатор формы лестницы.
- * @returns {boolean} `true` для Г-, П-образных и отдельных забежных схем.
- */
-const isWinderShape = (shape) => shape.includes('winder');
-
-/**
  * Определяет, относится ли форма лестницы к маршевым схемам с обычной проступью.
  * @param {string} shape - Идентификатор формы лестницы.
  * @returns {boolean} `true` для прямой лестницы и лестниц с площадкой.
@@ -130,11 +131,7 @@ const isMarchShape = (shape) => shape === 'straight' || shape.includes('platform
 const FIELD_VISIBILITY_BY_SHAPE = {
   straight: ['flightWidth', 'openingLength', 'autoSteps'],
   'l-platform': ['flightWidth', 'openingLength', 'landingLength', 'firstFlightSteps', 'secondFlightSteps'],
-  'l-winder': ['flightWidth', 'winderSteps', 'turnRadius'],
-  'u-platform': ['flightWidth', 'openingLength', 'landingLength', 'firstFlightSteps', 'secondFlightSteps', 'thirdFlightSteps'],
-  'u-winder': ['flightWidth', 'firstTurnWinderSteps', 'secondTurnWinderSteps', 'turnRadius'],
-  'winder-90': ['flightWidth', 'winderSteps', 'turnRadius'],
-  'winder-180': ['flightWidth', 'winderSteps', 'turnRadius'],
+  'u-platform': ['flightWidth', 'openingLength', 'landingLength', 'firstFlightSteps', 'secondFlightSteps'],
   spiral: ['outerRadius', 'innerRadius', 'spiralStepsPerTurn'],
 };
 
@@ -168,12 +165,8 @@ const getShapeDefaults = (shape, currentForm) => {
 
   return {
     landingLength: Number(currentForm.flightWidth),
-    firstFlightSteps: shape === 'u-platform' ? thirdSteps : halfSteps,
-    secondFlightSteps: shape === 'u-platform' ? thirdSteps : Math.max(safeSteps - halfSteps, 1),
-    firstTurnWinderSteps: 3,
-    secondTurnWinderSteps: 3,
-    winderSteps: shape === 'winder-180' ? 6 : 3,
-    turnRadius: Number(currentForm.flightWidth),
+    firstFlightSteps: halfSteps,
+    secondFlightSteps: Math.max(safeSteps - halfSteps, 1),
     outerRadius: 1000,
     innerRadius: 200,
     spiralStepsPerTurn: 12,
@@ -186,7 +179,7 @@ const getShapeDefaults = (shape, currentForm) => {
  * @returns {number} Угол поворота в градусах.
  */
 const getTurnAngle = (shape) => {
-  if (shape.includes('180') || shape === 'u-winder' || shape === 'u-platform') {
+  if (shape.includes('180') || shape === 'u-platform') {
     return 180;
   }
 
@@ -204,15 +197,19 @@ const getTurnAngle = (shape) => {
  * @returns {number} Рекомендуемое количество подъемов.
  */
 const calculateAutoSteps = (form) => {
-  let bestSteps = clamp(Math.round(form.height / 175), 3, 18);
+  const totalRise = getTotalRise(form);
+  const flightCount = getFlightCount(form);
+  const minSteps = Math.max(flightCount * 3, 3);
+  const maxSteps = flightCount * 18;
+  let bestSteps = clamp(Math.round(totalRise / 175), minSteps, maxSteps);
   let bestScore = Number.POSITIVE_INFINITY;
 
-  for (let steps = 3; steps <= 18; steps += 1) {
-    const riser = form.height / steps;
+  for (let steps = minSteps; steps <= maxSteps; steps += 1) {
+    const riser = totalRise / steps;
     const tread = form.openingLength / Math.max(steps - 1, 1);
     const blondel = 2 * riser + tread;
     const riserPenalty = isBetween(riser, 150, 200) ? 0 : Math.abs(riser - 175) * 4;
-    const treadTarget = isWinderShape(form.shape) ? 225 : 280;
+    const treadTarget = 280;
     const treadPenalty = Math.abs(tread - treadTarget);
     const blondelPenalty = Math.abs(blondel - 620);
     const score = riserPenalty + treadPenalty + blondelPenalty;
@@ -227,46 +224,16 @@ const calculateAutoSteps = (form) => {
 };
 
 /**
- * Возвращает суммарное количество забежных ступеней для выбранной формы.
- * Для П-образной схемы складывает два отдельных поворота.
- * @param {object} form - Текущие значения формы.
- * @returns {number} Количество забежных ступеней с учетом минимальных значений.
- */
-const getWinderStepsCount = (form) => {
-  if (form.shape === 'u-winder') {
-    return Math.max(Number(form.firstTurnWinderSteps), 3) + Math.max(Number(form.secondTurnWinderSteps), 3);
-  }
-
-  if (form.shape === 'winder-180') {
-    return Math.max(Number(form.winderSteps), 6);
-  }
-
-  return Math.max(Number(form.winderSteps), 3);
-};
-
-/**
  * Рассчитывает длину проема L для форм, где пользователь ее не вводит.
- * У забежных это длина линии хода: прямые проступи плюс дуга поворота по средней линии.
  * @param {object} form - Текущие значения формы.
- * @param {number} safeSteps - Количество подъемов после нормализации.
- * @param {number} turnAngle - Угол поворота лестницы в градусах.
- * @param {number} winderSteps - Количество забежных ступеней.
  * @returns {number} Введенная или расчетная длина проема L в миллиметрах.
  */
-const calculateOpeningLength = (form, safeSteps, turnAngle, winderSteps) => {
+const calculateOpeningLength = (form) => {
   if (form.shape === 'spiral') {
     return Number(form.outerRadius) * 2;
   }
 
-  if (!isWinderShape(form.shape)) {
-    return Number(form.openingLength);
-  }
-
-  const turnArcLength = Number(form.turnRadius) * (turnAngle * Math.PI / 180);
-  const straightSteps = Math.max(safeSteps - winderSteps, 0);
-  const straightRun = straightSteps * 280;
-
-  return straightRun + turnArcLength;
+  return Number(form.openingLength);
 };
 
 /**
@@ -277,22 +244,18 @@ const calculateOpeningLength = (form, safeSteps, turnAngle, winderSteps) => {
  * @returns {object} Количество подъемов в каждом марше.
  */
 const calculateFlightSteps = (form, safeSteps) => {
-  const firstFlightSteps = Math.max(Number(form.firstFlightSteps), 0);
-
-  if (form.shape === 'u-platform') {
-    const secondFlightSteps = Math.max(Number(form.secondFlightSteps), 0);
-
-    return {
-      firstFlightSteps,
-      secondFlightSteps,
-      thirdFlightSteps: Math.max(safeSteps - firstFlightSteps - secondFlightSteps, 0),
-    };
-  }
+  const flightStepsList = resolveFlightStepsList(form, safeSteps);
 
   return {
-    firstFlightSteps,
-    secondFlightSteps: Math.max(safeSteps - firstFlightSteps, 0),
-    thirdFlightSteps: 0,
+    firstFlightSteps: flightStepsList[0] ?? 0,
+    secondFlightSteps: flightStepsList[1] ?? 0,
+    thirdFlightSteps: flightStepsList[2] ?? 0,
+    flightStepsList,
+    flightCount: getFlightCount(form),
+    maxStepsPerFlight: getMaxStepsPerFlight(flightStepsList),
+    minStepsPerFlight: flightStepsList.filter((steps) => steps > 0).length
+      ? Math.min(...flightStepsList.filter((steps) => steps > 0))
+      : 0,
   };
 };
 
@@ -312,7 +275,7 @@ const calculateMaterialUsage = (form, geometry) => {
     * form.treadThickness
   ) / 1_000_000_000;
   const horizontalRun = form.shape === 'spiral' ? geometry.safeSteps * geometry.spiralLineTread : geometry.flightLength;
-  const stringerLength = Math.hypot(form.height, horizontalRun) / 1000;
+  const stringerLength = Math.hypot(geometry.totalRise ?? form.height, horizontalRun) / 1000;
   // Высоту балки принимаем приближенно как два подступенка, чтобы T влияла на объем несущей части.
   const stringerHeight = Math.max(geometry.riser * 2, 220);
   const stringerVolume = (2 * stringerLength * form.stringerThickness * stringerHeight) / 1_000_000;
@@ -331,31 +294,24 @@ const calculateMaterialUsage = (form, geometry) => {
 
 /**
  * Рассчитывает геометрию лестницы по введенным параметрам.
- * Для маршевых схем использует горизонтальную проекцию, для забежных - среднюю линию хода,
- * для винтовой - дугу окружности на радиусе линии хода.
+ * Для маршевых схем использует горизонтальную проекцию, для винтовой - дугу окружности на радиусе линии хода.
  * @param {object} form - Текущие значения формы.
  * @returns {object} Рассчитанные геометрические параметры.
  */
 const calculateGeometry = (form) => {
   const steps = form.useAutoSteps ? calculateAutoSteps(form) : Number(form.steps);
   const safeSteps = Math.max(steps, 1);
-  const riser = form.height / safeSteps;
+  const floorCount = getFloorCount(form);
+  const totalRise = getTotalRise(form);
+  const riser = totalRise / safeSteps;
   const turnAngle = getTurnAngle(form.shape);
-  const winderSteps = getWinderStepsCount(form);
   const flightSteps = calculateFlightSteps(form, safeSteps);
-  const flightLength = calculateOpeningLength(form, safeSteps, turnAngle, winderSteps);
+  const flightLength = calculateOpeningLength(form);
   const landingLength = Math.max(Number(form.landingLength), Number(form.flightWidth));
   const marchRunLength = form.shape.includes('platform')
     ? Math.max(flightLength - landingLength, 1)
     : flightLength;
   const tread = marchRunLength / Math.max(safeSteps - 1, 1);
-  const turnRadius = Math.max(Number(form.turnRadius), 1);
-  const winderArcLength = turnRadius * (turnAngle * Math.PI / 180);
-  const winderMiddleTread = isWinderShape(form.shape) ? winderArcLength / Math.max(winderSteps, 1) : tread;
-  const winderStepAngle = turnAngle / Math.max(winderSteps, 1);
-  const winderInnerRadius = Math.max(turnRadius - Number(form.flightWidth) / 2, 100);
-  const winderOuterRadius = turnRadius + Number(form.flightWidth) / 2;
-  const winderNarrowEnd = winderInnerRadius * (winderStepAngle * Math.PI / 180);
   const innerRadius = Number(form.innerRadius);
   const outerRadius = Number(form.outerRadius);
   const walkingRadius = (outerRadius + innerRadius) / 2;
@@ -367,12 +323,12 @@ const calculateGeometry = (form) => {
   const spiralHeadroom = riser * spiralStepsPerTurn;
   const spiralTotalAngle = spiralStepAngleDeg * safeSteps;
   const treadWidth = form.shape === 'spiral' ? Math.max(outerRadius - innerRadius, 1) : Number(form.flightWidth);
-  const activeTread = form.shape === 'spiral' ? spiralLineTread : isWinderShape(form.shape) ? winderMiddleTread : tread;
-  const slopeAngle = Math.atan(form.height / Math.max((safeSteps - 1) * activeTread, 1)) * (180 / Math.PI);
+  const activeTread = form.shape === 'spiral' ? spiralLineTread : tread;
+  const slopeAngle = Math.atan(totalRise / Math.max((safeSteps - 1) * activeTread, 1)) * (180 / Math.PI);
   const spiralSlopeAngle = Math.atan(riser / spiralLineTread) * (180 / Math.PI);
   const blondel = 2 * riser + activeTread;
   const planLength = form.shape === 'spiral' ? outerRadius * 2 : flightLength;
-  const planWidth = form.shape === 'straight' ? form.flightWidth : form.shape === 'spiral' ? outerRadius * 2 : Math.max(form.flightWidth * 2, winderOuterRadius);
+  const planWidth = form.shape === 'straight' ? form.flightWidth : form.shape === 'spiral' ? outerRadius * 2 : form.flightWidth * 2;
   const materialUsage = calculateMaterialUsage(form, {
     activeTread,
     flightLength,
@@ -380,11 +336,13 @@ const calculateGeometry = (form) => {
     safeSteps,
     spiralLineTread,
     treadWidth,
+    totalRise,
   });
 
   return {
     activeTread,
     blondel,
+    floorCount,
     flightLength,
     ...flightSteps,
     innerRadius,
@@ -404,16 +362,9 @@ const calculateGeometry = (form) => {
     spiralStepsPerTurn,
     spiralTotalAngle,
     tread,
+    totalRise,
     turnAngle,
-    turnRadius,
     walkingRadius,
-    winderArcLength,
-    winderInnerRadius,
-    winderMiddleTread,
-    winderNarrowEnd,
-    winderOuterRadius,
-    winderStepAngle,
-    winderSteps,
   };
 };
 
@@ -438,21 +389,22 @@ const createCheck = (status, title, value, note, fix = '') => ({ status, title, 
 const buildChecks = (form, geometry) => {
   const checks = [];
   const isSpiral = form.shape === 'spiral';
-  const isWinder = isWinderShape(form.shape);
   const isMarch = isMarchShape(form.shape);
   const stepsFix = form.shape === 'straight'
     ? 'Измените высоту подъема H, длину проема L или отключите авторасчет и задайте количество подъемов вручную.'
     : 'Измените высоту подъема H или общее количество ступеней n.';
-  const treadFix = isWinder
-    ? 'Измените радиус поворота по средней линии или количество забежных ступеней.'
-    : 'Измените длину проема L, количество подъемов n или распределение ступеней по маршам.';
+  const treadFix = 'Измените длину проема L, количество подъемов n или распределение ступеней по маршам.';
 
   checks.push(
     createCheck(
-      isBetween(geometry.safeSteps, 3, 18) ? 'ok' : 'error',
+      geometry.flightCount > 1
+        ? (geometry.minStepsPerFlight >= 3 && geometry.maxStepsPerFlight <= 18 ? 'ok' : 'error')
+        : (isBetween(geometry.safeSteps, 3, 18) ? 'ok' : 'error'),
       'Число ступеней в марше',
-      `${geometry.safeSteps} шт.`,
-      'Обязательный диапазон: 3-18',
+      geometry.flightCount > 1
+        ? `${geometry.maxStepsPerFlight} шт. макс. (${geometry.flightCount} маршей)`
+        : `${geometry.safeSteps} шт.`,
+      'Обязательный диапазон: 3-18 на каждый марш',
       stepsFix,
     ),
   );
@@ -474,27 +426,6 @@ const buildChecks = (form, geometry) => {
         `${formatNumber(geometry.tread, 1)} мм`,
         'Обязательный диапазон: 260-300 мм',
         treadFix,
-      ),
-    );
-  }
-
-  if (isWinder) {
-    checks.push(
-      createCheck(
-        isBetween(geometry.winderMiddleTread, 200, 250) ? 'ok' : 'error',
-        'Забежные: ширина по средней линии',
-        `${formatNumber(geometry.winderMiddleTread, 1)} мм`,
-        'Обязательный диапазон: 200-250 мм',
-        'Измените радиус поворота по средней линии или количество забежных ступеней. Длина L для этой формы считается автоматически.',
-      ),
-    );
-    checks.push(
-      createCheck(
-        geometry.winderNarrowEnd >= 100 ? 'ok' : 'error',
-        'Забежные: узкий конец',
-        `${formatNumber(geometry.winderNarrowEnd, 1)} мм`,
-        'Минимум 100 мм',
-        'Увеличьте радиус поворота по средней линии или количество забежных ступеней.',
       ),
     );
   }
@@ -637,10 +568,10 @@ const drawProfile = (canvas, form, geometry) => {
   const height = canvas.clientHeight;
   const padding = 44;
   const horizontalRun = form.shape === 'spiral' ? geometry.safeSteps * geometry.spiralLineTread : geometry.flightLength;
-  const scale = Math.min((width - padding * 2) / horizontalRun, (height - padding * 2) / form.height);
+  const scale = Math.min((width - padding * 2) / horizontalRun, (height - padding * 2) / geometry.totalRise);
   const baseX = padding;
   const baseY = height - padding;
-  const topY = baseY - form.height * scale;
+  const topY = baseY - geometry.totalRise * scale;
   const endX = baseX + horizontalRun * scale;
 
   ctx.font = '13px Arial';
@@ -685,7 +616,7 @@ const drawProfile = (canvas, form, geometry) => {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  drawDimension(ctx, `H = ${formatNumber(form.height)} мм`, baseX - 22, baseY, baseX - 22, topY);
+  drawDimension(ctx, `H = ${formatNumber(geometry.totalRise)} мм`, baseX - 22, baseY, baseX - 22, topY);
   drawDimension(ctx, `L = ${formatNumber(horizontalRun)} мм`, baseX, baseY + 36, endX, baseY + 36);
 
   ctx.fillStyle = '#334155';
@@ -728,37 +659,6 @@ const drawFlightPlan = (ctx, x, y, length, width, steps, direction = 'horizontal
       ctx.lineTo(x + width, stepY);
     }
 
-    ctx.stroke();
-  }
-};
-
-/**
- * Рисует сектор забежных ступеней на плане.
- * @param {CanvasRenderingContext2D} ctx - Контекст Canvas.
- * @param {number} cx - Центр поворота X.
- * @param {number} cy - Центр поворота Y.
- * @param {number} innerRadius - Внутренний радиус сектора.
- * @param {number} outerRadius - Внешний радиус сектора.
- * @param {number} startAngle - Начальный угол в радианах.
- * @param {number} turnAngle - Угол поворота в радианах.
- * @param {number} steps - Количество забежных ступеней.
- * @returns {void}
- */
-const drawWinderSector = (ctx, cx, cy, innerRadius, outerRadius, startAngle, turnAngle, steps) => {
-  ctx.strokeStyle = '#f97316';
-  ctx.fillStyle = 'rgba(249, 115, 22, 0.08)';
-  ctx.lineWidth = 2;
-
-  for (let index = 0; index < steps; index += 1) {
-    const angle1 = startAngle + (turnAngle / steps) * index;
-    const angle2 = startAngle + (turnAngle / steps) * (index + 1);
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, outerRadius, angle1, angle2);
-    ctx.lineTo(cx + Math.cos(angle2) * innerRadius, cy + Math.sin(angle2) * innerRadius);
-    ctx.arc(cx, cy, innerRadius, angle2, angle1, true);
-    ctx.closePath();
-    ctx.fill();
     ctx.stroke();
   }
 };
@@ -810,7 +710,7 @@ const drawSpiralPlan = (ctx, cx, cy, scale, geometry) => {
 };
 
 /**
- * Рисует план лестницы с габаритами и специальной графикой для забежных и винтовых схем.
+ * Рисует план лестницы с габаритами и специальной графикой для винтовых схем.
  * @param {HTMLCanvasElement} canvas - Canvas плана.
  * @param {object} form - Текущие значения формы.
  * @param {object} geometry - Рассчитанные параметры.
@@ -861,30 +761,22 @@ const drawPlan = (canvas, form, geometry) => {
     ctx.fillText(`Площадка ${formatNumber(geometry.landingLength)}×${formatNumber(form.flightWidth)} мм`, originX + firstFlightLength + 8, originY + landing + 22);
   } else if (form.shape === 'u-platform') {
     const marchRun = Math.max(geometry.flightLength - geometry.landingLength, 1) * scale;
-    const enteredFlightSteps = Math.max(geometry.firstFlightSteps + geometry.secondFlightSteps + geometry.thirdFlightSteps, 1);
-    const firstFlightLength = marchRun * (geometry.firstFlightSteps / enteredFlightSteps);
-    const secondFlightLength = marchRun * (geometry.secondFlightSteps / enteredFlightSteps);
-    const thirdFlightLength = Math.max(marchRun - firstFlightLength - secondFlightLength, flightWidth);
+    const totalSteps = Math.max(geometry.firstFlightSteps + geometry.secondFlightSteps, 1);
+    const firstFlightLength = marchRun * (geometry.firstFlightSteps / totalSteps);
+    const secondFlightLength = Math.max(marchRun - firstFlightLength, flightWidth);
 
-    drawFlightPlan(ctx, originX, originY + landing, firstFlightLength, flightWidth, geometry.firstFlightSteps);
-    drawFlightPlan(ctx, originX + firstFlightLength, originY, secondFlightLength, flightWidth, geometry.secondFlightSteps);
-    drawFlightPlan(ctx, originX, originY, thirdFlightLength, flightWidth, geometry.thirdFlightSteps);
+    drawFlightPlan(ctx, originX, originY + flightWidth, firstFlightLength, flightWidth, geometry.firstFlightSteps);
+    drawFlightPlan(
+      ctx,
+      originX + firstFlightLength - secondFlightLength,
+      originY,
+      secondFlightLength,
+      flightWidth,
+      geometry.secondFlightSteps,
+    );
     ctx.strokeStyle = '#22c55e';
     ctx.strokeRect(originX + firstFlightLength, originY, landing, flightWidth * 2);
     ctx.fillText(`Площадка ${formatNumber(geometry.landingLength)} мм`, originX + firstFlightLength + 8, originY + flightWidth);
-  } else {
-    const cx = originX + Math.min(flightLength * 0.52, width - padding - geometry.winderOuterRadius * scale);
-    const cy = originY + flightWidth * 1.35;
-    const outer = geometry.winderOuterRadius * scale;
-    const inner = geometry.winderInnerRadius * scale;
-    const turn = geometry.turnAngle * (Math.PI / 180);
-
-    drawFlightPlan(ctx, originX, cy - flightWidth / 2, flightLength * 0.5, flightWidth, Math.ceil((geometry.safeSteps - geometry.winderSteps) / 2));
-    drawWinderSector(ctx, cx, cy, inner, outer, -Math.PI / 2, turn, geometry.winderSteps);
-    ctx.fillStyle = '#334155';
-    ctx.fillText(`по средней линии: ${formatNumber(geometry.winderMiddleTread, 1)} мм`, cx + 16, cy - 18);
-    ctx.fillText(`узкий конец: ${formatNumber(geometry.winderNarrowEnd, 1)} мм`, cx + 16, cy + 2);
-    ctx.fillText(`угол ступени: ${formatNumber(geometry.winderStepAngle, 1)}°`, cx + 16, cy + 22);
   }
 
   drawDimension(ctx, `Габарит ${formatNumber(geometry.planLength)} мм`, originX, height - 28, originX + geometry.planLength * scale, height - 28);
@@ -932,7 +824,7 @@ const renderParameterHeader = (label, hint) => (
 
 /**
  * Возвращает расчетные параметры, которые относятся именно к выбранной форме лестницы.
- * Используется в форме, чтобы ошибки по забежным или винтовым элементам были связаны с видимыми значениями.
+ * Используется в форме, чтобы ошибки по винтовым элементам были связаны с видимыми значениями.
  * @param {object} form - Текущие значения формы.
  * @param {object} geometry - Рассчитанная геометрия лестницы.
  * @returns {Array<{label: string, value: string, note: string}>} Список параметров выбранной формы для вывода.
@@ -940,6 +832,8 @@ const renderParameterHeader = (label, hint) => (
 const buildShapeParameters = (form, geometry) => {
   if (form.shape === 'spiral') {
     return [
+      { label: 'Этажей', value: `${geometry.floorCount} шт.`, note: 'Общий подъём = H × (этажей − 1)' },
+      { label: 'Подъёмов n', value: `${geometry.safeSteps} шт.`, note: 'На всю высоту лестницы' },
       { label: 'Расчетная длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Диаметр по внешнему радиусу, только для чтения' },
       { label: 'Проступь по линии хода', value: `${formatNumber(geometry.spiralLineTread, 1)} мм`, note: 'Минимум 180 мм' },
       { label: 'Узкая часть ступени', value: `${formatNumber(geometry.spiralNarrowEnd, 1)} мм`, note: 'Минимум 100 мм' },
@@ -950,27 +844,28 @@ const buildShapeParameters = (form, geometry) => {
     ];
   }
 
-  if (isWinderShape(form.shape)) {
+  if (form.shape.includes('platform')) {
+    const flightSummary = geometry.flightCount > 2
+      ? `${geometry.flightCount} маршей: ${geometry.flightStepsList.join(' + ')}`
+      : `${geometry.firstFlightSteps} + ${geometry.secondFlightSteps}`;
+
     return [
-      { label: 'Расчетная длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Считается по прямым участкам и дуге поворота' },
-      { label: 'Забежные ступени', value: `${geometry.winderSteps} шт.`, note: geometry.turnAngle === 180 ? 'Минимум 6 шт.' : 'Минимум 3 шт.' },
-      { label: 'Радиус средней линии', value: `${formatNumber(geometry.turnRadius)} мм`, note: 'Задается в форме' },
-      { label: 'Ширина по средней линии', value: `${formatNumber(geometry.winderMiddleTread, 1)} мм`, note: 'Обязательный диапазон: 200-250 мм' },
-      { label: 'Узкий конец забежной', value: `${formatNumber(geometry.winderNarrowEnd, 1)} мм`, note: 'Минимум 100 мм' },
-      { label: 'Угол забежной ступени', value: `${formatNumber(geometry.winderStepAngle, 1)}°`, note: 'Расчетное значение' },
+      { label: 'Этажей', value: `${geometry.floorCount} шт.`, note: 'Общий подъём = H × (этажей − 1)' },
+      { label: 'Маршей', value: `${geometry.flightCount} шт.`, note: flightSummary },
+      { label: 'Длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Задается полем L' },
+      { label: 'Глубина проступи', value: `${formatNumber(geometry.tread, 1)} мм`, note: 'Обязательный диапазон: 260-300 мм' },
+      { label: 'Размер площадки', value: `${formatNumber(geometry.landingLength)} мм`, note: 'Не меньше ширины марша' },
       { label: 'Поворот лестницы', value: `${geometry.turnAngle}°`, note: 'Зависит от формы' },
     ];
   }
 
-  if (form.shape.includes('platform')) {
+  if (form.shape === 'straight' && geometry.flightCount > 1) {
     return [
-      { label: 'Длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Задается полем L' },
+      { label: 'Этажей', value: `${geometry.floorCount} шт.`, note: 'Общий подъём = H × (этажей − 1)' },
+      { label: 'Маршей', value: `${geometry.flightCount} шт.`, note: geometry.flightStepsList.join(' + ') },
+      { label: 'Длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'На один пролёт' },
       { label: 'Глубина проступи', value: `${formatNumber(geometry.tread, 1)} мм`, note: 'Обязательный диапазон: 260-300 мм' },
-      { label: 'Размер площадки', value: `${formatNumber(geometry.landingLength)} мм`, note: 'Не меньше ширины марша' },
-      { label: 'Ступени 1-го марша', value: `${geometry.firstFlightSteps} шт.`, note: 'Задается в форме' },
-      { label: 'Ступени 2-го марша', value: `${geometry.secondFlightSteps} шт.`, note: form.shape === 'u-platform' ? 'Задается в форме' : 'Авторасчет остатка' },
-      ...(form.shape === 'u-platform' ? [{ label: 'Ступени 3-го марша', value: `${geometry.thirdFlightSteps} шт.`, note: 'Авторасчет остатка' }] : []),
-      { label: 'Поворот лестницы', value: `${geometry.turnAngle}°`, note: 'Зависит от формы' },
+      { label: 'Габарит плана', value: `${formatNumber(geometry.planLength)} × ${formatNumber(geometry.planWidth)} мм`, note: 'Расчетный размер сверху' },
     ];
   }
 
@@ -982,31 +877,146 @@ const buildShapeParameters = (form, geometry) => {
 };
 
 /**
+ * Форматирует компонентную конфигурацию для JSON-редактора.
+ * Используется при автогенерации и сбросе ручной конфигурации.
+ * @param {Array<object>} components - Массив компонентов лестницы.
+ * @returns {string} Отформатированный JSON с отступами.
+ */
+const formatComponentsJson = (components) => JSON.stringify(components, null, 2);
+
+/**
+ * Создает полный расчетный снимок формы: геометрию и компонентную 3D-конфигурацию.
+ * Zustand-store вызывает функцию при каждом изменении параметров лестницы.
+ * @param {object} form - Текущие значения формы.
+ * @returns {{geometry: object, generatedComponents: Array<object>}} Расчетная геометрия и компоненты.
+ */
+const createStairSnapshot = (form) => {
+  const geometry = calculateGeometry(form);
+
+  return {
+    generatedComponents: generateComponents(form, geometry),
+    geometry,
+  };
+};
+
+const initialStairSnapshot = createStairSnapshot(INITIAL_FORM);
+
+/**
+ * Хранит параметры лестницы, расчетную геометрию и активную JSON-конфигурацию 3D.
+ * При изменении любого параметра автоматически пересчитывает `geometry` и `generatedComponents`.
+ */
+const useStairStore = create((set) => ({
+  activeResultTab: RESULT_TABS[0].id,
+  componentJson: formatComponentsJson(initialStairSnapshot.generatedComponents),
+  componentJsonError: '',
+  form: INITIAL_FORM,
+  generatedComponents: initialStairSnapshot.generatedComponents,
+  geometry: initialStairSnapshot.geometry,
+  isCustomConfig: false,
+  customComponents: initialStairSnapshot.generatedComponents,
+  /**
+   * Обновляет форму и пересчитывает все производные данные лестницы.
+   * @param {object|Function} updater - Объект новых полей или callback от текущей формы.
+   * @returns {void}
+   */
+  setForm: (updater) => set((state) => {
+    const nextForm = typeof updater === 'function' ? updater(state.form) : { ...state.form, ...updater };
+    const snapshot = createStairSnapshot(nextForm);
+
+    return {
+      form: nextForm,
+      generatedComponents: snapshot.generatedComponents,
+      geometry: snapshot.geometry,
+      componentJson: formatComponentsJson(snapshot.generatedComponents),
+      componentJsonError: '',
+      customComponents: snapshot.generatedComponents,
+      isCustomConfig: false,
+    };
+  }),
+  /**
+   * Переключает активную вкладку результата калькулятора.
+   * @param {string} tabId - Идентификатор вкладки.
+   * @returns {void}
+   */
+  setActiveResultTab: (tabId) => set({ activeResultTab: tabId }),
+  /**
+   * Парсит ручной JSON и включает кастомную 3D-конфигурацию при валидном массиве.
+   * @param {string} nextJson - Текст JSON из редактора.
+   * @returns {void}
+   */
+  setComponentJson: (nextJson) => set((state) => {
+    try {
+      const parsedComponents = JSON.parse(nextJson);
+
+      if (!Array.isArray(parsedComponents)) {
+        return {
+          componentJson: nextJson,
+          componentJsonError: 'JSON должен быть массивом компонентов.',
+          isCustomConfig: state.isCustomConfig,
+        };
+      }
+
+      return {
+        componentJson: nextJson,
+        componentJsonError: '',
+        customComponents: parsedComponents,
+        isCustomConfig: true,
+      };
+    } catch (error) {
+      return {
+        componentJson: nextJson,
+        componentJsonError: error instanceof Error ? error.message : 'Не удалось разобрать JSON.',
+        isCustomConfig: state.isCustomConfig,
+      };
+    }
+  }),
+  /**
+   * Возвращает 3D-конфигурацию к автоматической генерации из текущих параметров формы.
+   * @returns {void}
+   */
+  resetComponents: () => set((state) => ({
+    componentJson: formatComponentsJson(state.generatedComponents),
+    componentJsonError: '',
+    customComponents: state.generatedComponents,
+    isCustomConfig: false,
+  })),
+}));
+
+/**
  * Главный React-компонент калькулятора лестниц.
  * Хранит ввод пользователя, запускает расчеты и синхронизирует Canvas-чертежи с результатами.
  * @returns {JSX.Element} Интерфейс калькулятора.
  */
 const App = () => {
-  const [form, setForm] = useState(INITIAL_FORM);
+  const activeResultTab = useStairStore((state) => state.activeResultTab);
+  const componentJson = useStairStore((state) => state.componentJson);
+  const componentJsonError = useStairStore((state) => state.componentJsonError);
+  const customComponents = useStairStore((state) => state.customComponents);
+  const form = useStairStore((state) => state.form);
+  const generatedComponents = useStairStore((state) => state.generatedComponents);
+  const geometry = useStairStore((state) => state.geometry);
+  const isCustomConfig = useStairStore((state) => state.isCustomConfig);
+  const resetComponents = useStairStore((state) => state.resetComponents);
+  const setActiveResultTab = useStairStore((state) => state.setActiveResultTab);
+  const setComponentJson = useStairStore((state) => state.setComponentJson);
+  const setForm = useStairStore((state) => state.setForm);
   const profileCanvasRef = useRef(null);
   const planCanvasRef = useRef(null);
-  const geometry = useMemo(() => calculateGeometry(form), [form]);
+  const activeComponents = isCustomConfig ? customComponents : generatedComponents;
   const report = useMemo(() => buildChecks(form, geometry), [form, geometry]);
   const selectedShape = SHAPES.find((shape) => shape.value === form.shape)?.label;
   const selectedMaterial = MATERIALS.find((material) => material.value === form.material)?.label;
   const isSpiral = form.shape === 'spiral';
-  const isWinder = isWinderShape(form.shape);
   const canUseAutoSteps = isFieldVisible(form.shape, 'autoSteps');
   const shapeParameters = useMemo(() => buildShapeParameters(form, geometry), [form, geometry]);
   const exportData = useMemo(() => ({
     form,
     geometry,
     isSpiral,
-    isWinder,
     report,
     selectedMaterial,
     selectedShape,
-  }), [form, geometry, isSpiral, isWinder, report, selectedMaterial, selectedShape]);
+  }), [form, geometry, isSpiral, report, selectedMaterial, selectedShape]);
 
   /**
    * Обновляет числовое поле формы с приведением к Number.
@@ -1015,9 +1025,15 @@ const App = () => {
    */
   const handleNumberChange = (event) => {
     const { name, value } = event.target;
+    let nextValue = Number(value);
+
+    if (name === 'floors') {
+      nextValue = Math.min(3, Math.max(2, Number.isFinite(nextValue) ? nextValue : 2));
+    }
+
     setForm((currentForm) => ({
       ...currentForm,
-      [name]: Number(value),
+      [name]: nextValue,
     }));
   };
 
@@ -1069,6 +1085,15 @@ const App = () => {
     }));
   };
 
+  /**
+   * Переключает активную вкладку калькулятора.
+   * @param {string} tabId - Идентификатор вкладки из `RESULT_TABS`.
+   * @returns {void}
+   */
+  const handleResultTabClick = (tabId) => {
+    setActiveResultTab(tabId);
+  };
+
   useEffect(() => {
     /**
      * Перерисовывает оба Canvas при изменении расчетов или размеров окна.
@@ -1083,7 +1108,7 @@ const App = () => {
     window.addEventListener('resize', handleDraw);
 
     return () => window.removeEventListener('resize', handleDraw);
-  }, [form, geometry]);
+  }, [activeResultTab, form, geometry]);
 
   return (
     <main className="app">
@@ -1092,7 +1117,7 @@ const App = () => {
           <p className="hero__eyebrow">СП 55.13330.2016 · ГОСТ 9818-2015 · СП 1.13130.2020</p>
           <h1 className="hero__title">Калькулятор лестниц для частного жилого дома</h1>
           <p className="hero__text">
-            Мягкая проверка норм для домов до 3 этажей: маршевые, забежные и винтовые лестницы,
+            Мягкая проверка норм для домов до 3 этажей: маршевые и винтовые лестницы,
             материалы дерево, сталь и железобетон. Пожарный тип по умолчанию: {form.fireType}.
           </p>
         </div>
@@ -1101,7 +1126,21 @@ const App = () => {
         </div>
       </section>
 
-      <section className="layout">
+      <nav className="result-tabs no-print" aria-label="Разделы калькулятора">
+        {RESULT_TABS.map((tab) => (
+          <button
+            aria-current={activeResultTab === tab.id ? 'page' : undefined}
+            className={activeResultTab === tab.id ? 'result-tabs__button result-tabs__button--active' : 'result-tabs__button'}
+            key={tab.id}
+            onClick={() => handleResultTabClick(tab.id)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      <section className={activeResultTab === 'input-parameters' ? 'layout result-panel result-panel--active' : 'layout result-panel'}>
         <form className="card form" aria-label="Параметры лестницы">
           <div className="form__grid">
             <label className="field">
@@ -1124,6 +1163,19 @@ const App = () => {
                 onChange={handleNumberChange}
                 type="number"
                 value={form.height}
+              />
+            </label>
+
+            <label className="field">
+              <span className="field__label">{renderParameterHeader('Количество этажей', PARAMETER_HINTS.floors)}</span>
+              <input
+                className="field__control"
+                min="2"
+                max="3"
+                name="floors"
+                onChange={handleNumberChange}
+                type="number"
+                value={form.floors}
               />
             </label>
 
@@ -1189,7 +1241,7 @@ const App = () => {
               </label>
             )}
 
-            {isFieldVisible(form.shape, 'firstFlightSteps') && (
+            {isFieldVisible(form.shape, 'firstFlightSteps') && geometry.flightCount === 2 && (
               <label className="field">
                 <span className="field__label">{renderParameterHeader('Количество ступеней в 1-м марше', PARAMETER_HINTS.firstFlightSteps)}</span>
                 <input
@@ -1203,88 +1255,17 @@ const App = () => {
               </label>
             )}
 
-            {isFieldVisible(form.shape, 'secondFlightSteps') && (
+            {isFieldVisible(form.shape, 'secondFlightSteps') && geometry.flightCount === 2 && (
               <label className="field">
                 <span className="field__label">{renderParameterHeader('Количество ступеней во 2-м марше', PARAMETER_HINTS.secondFlightSteps)}</span>
                 <input
                   className="field__control"
-                  disabled={form.shape === 'l-platform'}
+                  disabled={form.shape === 'l-platform' || form.shape === 'u-platform'}
                   min="0"
                   name="secondFlightSteps"
                   onChange={handleNumberChange}
                   type="number"
-                  value={form.shape === 'l-platform' ? geometry.secondFlightSteps : form.secondFlightSteps}
-                />
-              </label>
-            )}
-
-            {isFieldVisible(form.shape, 'thirdFlightSteps') && (
-              <label className="field">
-                <span className="field__label">{renderParameterHeader('Количество ступеней в 3-м марше', PARAMETER_HINTS.thirdFlightSteps)}</span>
-                <input
-                  className="field__control"
-                  disabled
-                  min="0"
-                  name="thirdFlightSteps"
-                  type="number"
-                  value={geometry.thirdFlightSteps}
-                />
-              </label>
-            )}
-
-            {isFieldVisible(form.shape, 'winderSteps') && (
-              <label className="field">
-                <span className="field__label">{renderParameterHeader('Количество забежных ступеней', PARAMETER_HINTS.winderSteps)}</span>
-                <input
-                  className="field__control"
-                  max={form.shape === 'winder-180' ? 10 : 5}
-                  min={form.shape === 'winder-180' ? 6 : 3}
-                  name="winderSteps"
-                  onChange={handleNumberChange}
-                  type="number"
-                  value={form.winderSteps}
-                />
-              </label>
-            )}
-
-            {isFieldVisible(form.shape, 'firstTurnWinderSteps') && (
-              <label className="field">
-                <span className="field__label">{renderParameterHeader('Забежные ступени в 1-м повороте', PARAMETER_HINTS.firstTurnWinderSteps)}</span>
-                <input
-                  className="field__control"
-                  min="3"
-                  name="firstTurnWinderSteps"
-                  onChange={handleNumberChange}
-                  type="number"
-                  value={form.firstTurnWinderSteps}
-                />
-              </label>
-            )}
-
-            {isFieldVisible(form.shape, 'secondTurnWinderSteps') && (
-              <label className="field">
-                <span className="field__label">{renderParameterHeader('Забежные ступени во 2-м повороте', PARAMETER_HINTS.secondTurnWinderSteps)}</span>
-                <input
-                  className="field__control"
-                  min="3"
-                  name="secondTurnWinderSteps"
-                  onChange={handleNumberChange}
-                  type="number"
-                  value={form.secondTurnWinderSteps}
-                />
-              </label>
-            )}
-
-            {isFieldVisible(form.shape, 'turnRadius') && (
-              <label className="field">
-                <span className="field__label">{renderParameterHeader('Радиус поворота по средней линии, мм', PARAMETER_HINTS.turnRadius)}</span>
-                <input
-                  className="field__control"
-                  min="1"
-                  name="turnRadius"
-                  onChange={handleNumberChange}
-                  type="number"
-                  value={form.turnRadius}
+                  value={form.shape.includes('platform') ? geometry.secondFlightSteps : form.secondFlightSteps}
                 />
               </label>
             )}
@@ -1434,19 +1415,33 @@ const App = () => {
         </section>
       </section>
 
-      <section className="drawings">
+      <section className={activeResultTab === 'side-view' ? 'drawings result-panel result-panel--active' : 'drawings result-panel'}>
         <article className="card drawing">
           <h2>Вид сбоку</h2>
           <canvas ref={profileCanvasRef} aria-label="Canvas с профилем лестницы" />
         </article>
+      </section>
+
+      <section className={activeResultTab === 'top-view' ? 'drawings result-panel result-panel--active' : 'drawings result-panel'}>
         <article className="card drawing">
           <h2>Вид сверху</h2>
           <canvas ref={planCanvasRef} aria-label="Canvas с планом лестницы" />
         </article>
-        <Staircase3D form={form} geometry={geometry} />
       </section>
 
-      <section className="card table-card">
+      <section className={activeResultTab === 'three-d' ? 'drawings result-panel result-panel--active' : 'drawings result-panel'}>
+        <Staircase3D
+          componentJson={componentJson}
+          componentJsonError={componentJsonError}
+          components={activeComponents}
+          form={form}
+          isCustomConfig={isCustomConfig}
+          onComponentJsonChange={setComponentJson}
+          onResetComponents={resetComponents}
+        />
+      </section>
+
+      <section className={activeResultTab === 'parameters' ? 'card table-card result-panel result-panel--active' : 'card table-card result-panel'}>
         <h2>Введенные и рассчитанные параметры</h2>
         <div className="table-wrap">
           <table>
@@ -1465,7 +1460,6 @@ const App = () => {
                   <tr><th>{renderParameterHeader('Длина площадки', PARAMETER_HINTS.landingLength)}</th><td>{formatNumber(geometry.landingLength)} мм</td></tr>
                   <tr><th>{renderParameterHeader('Ступени 1-го марша', PARAMETER_HINTS.firstFlightSteps)}</th><td>{geometry.firstFlightSteps} шт.</td></tr>
                   <tr><th>{renderParameterHeader('Ступени 2-го марша', PARAMETER_HINTS.secondFlightSteps)}</th><td>{geometry.secondFlightSteps} шт.</td></tr>
-                  {form.shape === 'u-platform' && <tr><th>{renderParameterHeader('Ступени 3-го марша', PARAMETER_HINTS.thirdFlightSteps)}</th><td>{geometry.thirdFlightSteps} шт.</td></tr>}
                 </>
               )}
               <tr><th>{renderParameterHeader('Высота ступени h', PARAMETER_HINTS.riser)}</th><td>{formatNumber(geometry.riser, 1)} мм</td></tr>
@@ -1480,21 +1474,6 @@ const App = () => {
               <tr><th>{renderParameterHeader('Угол наклона', PARAMETER_HINTS.slopeAngle)}</th><td>{formatNumber(isSpiral ? geometry.spiralSlopeAngle : geometry.slopeAngle, 1)}°</td></tr>
               <tr><th>{renderParameterHeader('Формула Блонделя', PARAMETER_HINTS.blondel)}</th><td>{formatNumber(geometry.blondel, 1)} мм</td></tr>
               <tr><th>{renderParameterHeader('Габарит плана', PARAMETER_HINTS.planSize)}</th><td>{formatNumber(geometry.planLength)} × {formatNumber(geometry.planWidth)} мм</td></tr>
-              {isWinder && (
-                <>
-                  <tr><th>Поворот</th><td>{geometry.turnAngle}°</td></tr>
-                  <tr><th>{renderParameterHeader('Радиус поворота по средней линии', PARAMETER_HINTS.turnRadius)}</th><td>{formatNumber(geometry.turnRadius)} мм</td></tr>
-                  {form.shape === 'u-winder' && (
-                    <>
-                      <tr><th>{renderParameterHeader('Забежные ступени в 1-м повороте', PARAMETER_HINTS.firstTurnWinderSteps)}</th><td>{form.firstTurnWinderSteps} шт.</td></tr>
-                      <tr><th>{renderParameterHeader('Забежные ступени во 2-м повороте', PARAMETER_HINTS.secondTurnWinderSteps)}</th><td>{form.secondTurnWinderSteps} шт.</td></tr>
-                    </>
-                  )}
-                  {form.shape !== 'u-winder' && <tr><th>{renderParameterHeader('Количество забежных ступеней', PARAMETER_HINTS.winderSteps)}</th><td>{geometry.winderSteps} шт.</td></tr>}
-                  <tr><th>Угол забежной ступени</th><td>{formatNumber(geometry.winderStepAngle, 1)}°</td></tr>
-                  <tr><th>Узкий конец забежной</th><td>{formatNumber(geometry.winderNarrowEnd, 1)} мм</td></tr>
-                </>
-              )}
               {isSpiral && (
                 <>
                   <tr><th>Внутренний радиус</th><td>{formatNumber(geometry.innerRadius)} мм</td></tr>
@@ -1509,7 +1488,7 @@ const App = () => {
         </div>
       </section>
 
-      <section className="card table-card">
+      <section className={activeResultTab === 'checks' ? 'card table-card result-panel result-panel--active' : 'card table-card result-panel'}>
         <h2>Проверки</h2>
         <div className="table-wrap">
           <table>
@@ -1535,7 +1514,9 @@ const App = () => {
         </div>
       </section>
 
-      <ExportPanel exportData={exportData} planCanvasRef={planCanvasRef} profileCanvasRef={profileCanvasRef} />
+      <section className={activeResultTab === 'export' ? 'result-panel result-panel--active' : 'result-panel'}>
+        <ExportPanel exportData={exportData} planCanvasRef={planCanvasRef} profileCanvasRef={profileCanvasRef} />
+      </section>
     </main>
   );
 };

@@ -27,6 +27,7 @@ button {
 }
 
 .app {
+  position: relative;
   width: min(1440px, 100%);
   margin: 0 auto;
   padding: 16px;
@@ -103,6 +104,63 @@ button {
 .drawings {
   grid-template-columns: 1fr;
   margin-bottom: 18px;
+}
+
+.result-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-bottom: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 12px 35px rgba(15, 23, 42, 0.06);
+}
+
+.result-tabs__button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 9px 14px;
+  color: #334155;
+  background: transparent;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.result-tabs__button:hover,
+.result-tabs__button:focus-visible {
+  border-color: #bae6fd;
+  color: #0369a1;
+  background: #f0f9ff;
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.14);
+  outline: none;
+}
+
+.result-tabs__button--active {
+  border-color: #0369a1;
+  color: #fff;
+  background: #0284c7;
+}
+
+.result-panel {
+  position: absolute;
+  inset-inline: 16px;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.result-panel--active {
+  position: relative;
+  inset-inline: auto;
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .card {
@@ -346,6 +404,12 @@ button {
   margin: 0;
 }
 
+.drawing__note {
+  margin: 6px 0 0;
+  color: #64748b;
+  line-height: 1.45;
+}
+
 .drawing__actions {
   display: flex;
   flex-wrap: wrap;
@@ -366,6 +430,65 @@ button {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.config-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  padding: 14px;
+  background: #f8fbff;
+}
+
+.config-editor__header {
+  display: grid;
+  gap: 12px;
+}
+
+.config-editor__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.config-editor__status {
+  margin: 6px 0 0;
+  color: #475569;
+  font-weight: 700;
+}
+
+.config-editor__textarea {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 12px;
+  color: #0f172a;
+  background: #fff;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  outline: none;
+}
+
+.config-editor__textarea:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.16);
+}
+
+.config-editor__textarea[aria-invalid="true"] {
+  border-color: #ef4444;
+}
+
+.config-editor__error {
+  margin: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #991b1b;
+  background: #fee2e2;
+  font-weight: 800;
 }
 
 .table-card {
@@ -683,6 +806,11 @@ th:has(.parameter-hint:focus-within) {
   .drawing__header {
     grid-template-columns: 1fr auto;
     align-items: center;
+  }
+
+  .config-editor__header {
+    grid-template-columns: 1fr auto;
+    align-items: start;
   }
 
   .form__grid {

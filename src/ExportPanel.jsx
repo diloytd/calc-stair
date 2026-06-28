@@ -787,7 +787,7 @@ const getParameterStatus = (parameterName, checks) => {
  * @returns {Array<{name: string, value: string, unit: string, status: string}>} Строки таблицы параметров.
  */
 const buildParameterRows = (data) => {
-  const { form, geometry, isSpiral, isWinder, selectedMaterial, selectedShape } = data;
+  const { form, geometry, isSpiral, selectedMaterial, selectedShape } = data;
   const rows = [
     { name: 'Форма', unit: '', value: selectedShape },
     { name: 'Материал', unit: '', value: selectedMaterial },
@@ -816,19 +816,6 @@ const buildParameterRows = (data) => {
       { name: 'Длина площадки', unit: 'мм', value: formatExportNumber(geometry.landingLength) },
       { name: 'Ступени 1-го марша', unit: 'шт.', value: formatExportNumber(geometry.firstFlightSteps) },
       { name: 'Ступени 2-го марша', unit: 'шт.', value: formatExportNumber(geometry.secondFlightSteps) },
-    );
-  }
-
-  if (form.shape === 'u-platform') {
-    rows.push({ name: 'Ступени 3-го марша', unit: 'шт.', value: formatExportNumber(geometry.thirdFlightSteps) });
-  }
-
-  if (isWinder) {
-    rows.push(
-      { name: 'Поворот', unit: '°', value: formatExportNumber(geometry.turnAngle) },
-      { name: 'Радиус поворота по средней линии', unit: 'мм', value: formatExportNumber(geometry.turnRadius) },
-      { name: 'Забежные ступени', unit: 'шт.', value: formatExportNumber(geometry.winderSteps) },
-      { name: 'Узкий конец забежной', unit: 'мм', value: formatExportNumber(geometry.winderNarrowEnd, 1) },
     );
   }
 
