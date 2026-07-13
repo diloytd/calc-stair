@@ -123,7 +123,7 @@ const PlatformSideLabels = ({ centerX, centerZ, length, width, topY }) => {
   const maxZ = centerZ + halfWidth;
   const inset = Math.min(Math.max(length, width) * 0.12, 120);
   const labelY = topY + 4;
-  const fontSize = Math.min(Math.max(length, width) * 0.22, 180);
+  const fontSize = Math.min(Math.max(length, width) * 0.26, 200);
   const sides = [
     { label: '1', position: [minX + inset, labelY, centerZ], rotation: [-Math.PI / 2, 0, Math.PI] },
     { label: '2', position: [centerX, labelY, maxZ - inset], rotation: [-Math.PI / 2, 0, Math.PI / 2] },
@@ -685,21 +685,13 @@ const SceneControls = ({ maxModelHeight, rendererRef, resetViewRef }) => {
  * @param {object} props - Свойства 3D-визуализации.
  * @param {object} props.form - Текущие параметры формы.
  * @param {Array<object>} props.components - Активная компонентная конфигурация лестницы.
- * @param {string} props.componentJson - Текст JSON-редактора.
- * @param {string} props.componentJsonError - Ошибка парсинга JSON, если есть.
- * @param {boolean} props.isCustomConfig - Используется ли ручная JSON-конфигурация.
- * @param {(value: string) => void} props.onComponentJsonChange - Обработчик изменения JSON.
- * @param {() => void} props.onResetComponents - Обработчик возврата к автогенерации.
- * @returns {JSX.Element} Карточка с интерактивной 3D-сценой и JSON-редактором.
+ * @param {object[]} props.components - Массив компонентов лестницы для 3D-сборки.
+ * @param {object} props.form - Параметры формы (материал и др.).
+ * @returns {JSX.Element} Карточка с интерактивной 3D-сценой.
  */
 const Staircase3D = ({
-  componentJson,
-  componentJsonError,
   components,
   form,
-  isCustomConfig,
-  onComponentJsonChange,
-  onResetComponents,
 }) => {
   const rendererRef = useRef(null);
   const resetViewRef = useRef(null);
@@ -741,21 +733,11 @@ const Staircase3D = ({
     link.click();
   };
 
-  /**
-   * Передает текст JSON в Zustand-store для парсинга и ручной сборки.
-   * @param {React.ChangeEvent<HTMLTextAreaElement>} event - Событие изменения textarea.
-   * @returns {void}
-   */
-  const handleJsonChange = (event) => {
-    onComponentJsonChange(event.target.value);
-  };
-
   return (
     <article className="card drawing drawing--3d">
       <div className="drawing__header">
         <div>
           <h2>3D-визуализация</h2>
-          <p className="drawing__note">React + R3F · Multi-floor · Flight / March / Platform / Spiral · v23</p>
         </div>
         <div className="drawing__actions">
           <button className="button" onClick={handleResetClick} type="button">Сбросить вид</button>
@@ -772,27 +754,6 @@ const Staircase3D = ({
           <SceneControls maxModelHeight={maxModelHeight} rendererRef={rendererRef} resetViewRef={resetViewRef} />
         </Canvas>
       </div>
-
-      <section className="config-editor" aria-label="JSON-редактор компонентной конфигурации">
-        <div className="config-editor__header">
-          <div>
-            <h3 className="config-editor__title">Компоненты лестницы JSON</h3>
-            <p className="config-editor__status">
-              {isCustomConfig ? 'Используется ручная конфигурация' : 'Автогенерация из параметров формы'}
-            </p>
-          </div>
-          <button className="button" onClick={onResetComponents} type="button">Сбросить к автогенерации</button>
-        </div>
-        <textarea
-          aria-invalid={componentJsonError ? 'true' : 'false'}
-          aria-label="JSON-массив компонентов лестницы"
-          className="config-editor__textarea"
-          onChange={handleJsonChange}
-          spellCheck="false"
-          value={componentJson}
-        />
-        {componentJsonError && <p className="config-editor__error">{componentJsonError}</p>}
-      </section>
     </article>
   );
 };

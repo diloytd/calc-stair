@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { create } from 'zustand';
 import ExportPanel from './ExportPanel.jsx';
 import Staircase3D from './Staircase3D.jsx';
+import { CANVAS_FONT_SIZE, scalePx } from './uiScale.js';
 import { generateComponents } from './stairComponents.js';
 import {
   getFlightCount,
@@ -26,17 +27,14 @@ const MATERIALS = [
 
 const PARAMETER_HINTS = {
   blondel: 'Расчетный показатель удобства шага: 2h + b. Ориентир по СП 55.13330.2016 и практике проектирования — 600-640 мм.',
-  fireType: 'Классификация лестницы по пожарным требованиям СП 1.13130.2020. Для эвакуационных лестниц применяются более строгие ограничения.',
   flightWidth: 'Расстояние от одного края ступени до другого края ступени поперек лестницы. Ориентир по СП 55.13330.2016 для частного дома — не менее 900 мм.',
   flightLength: 'Горизонтальная длина одного марша. Прямой нормы нет: значение определяется глубиной ступени и количеством подъемов.',
   form: 'Конструктивная схема лестницы. Выбор формы влияет на проверки по СП 55.13330.2016, ГОСТ 9818-2015 и СП 1.13130.2020.',
-  headroom: 'Свободная высота над лестницей в зоне прохода. Ориентир по СП 55.13330.2016 — не менее 2000 мм.',
   height: 'Высота одного этажа между чистыми полами соседних уровней. Для многоэтажной лестницы общий подъём = H × (этажей − 1).',
   floors: 'Количество этажей здания (от 2 до 3). Лестница строится от нижнего до верхнего уровня с промежуточными площадками между этажами.',
   material: 'Основной материал несущей конструкции лестницы. Требования к конструкциям учитываются по ГОСТ 9818-2015 и профильным нормам.',
   openingLength: 'Сколько места по полу есть под лестницу в длину. Это расстояние от начала лестницы до места, где она должна прийти к верхнему этажу, если смотреть сверху. Чем меньше значение, тем круче лестница; чем больше — тем глубже и удобнее ступени.',
   planSize: 'Габариты лестницы на виде сверху. Прямой нормы нет: размер должен помещаться в проем и сохранять нормативную ширину марша.',
-  railingHeight: 'Высота ограждения от ступени до верха перил. Ориентир по СП 55.13330.2016 — не менее 900 мм.',
   riser: 'Высота одного подъема между соседними ступенями. Ориентир по СП 55.13330.2016 — 150-200 мм.',
   slopeAngle: 'Угол наклона лестницы относительно пола. Рекомендуемый диапазон для маршевой лестницы — 30-40°, для винтовой — 25-35°.',
   steps: 'Количество подъемов от нижнего до верхнего уровня. По ГОСТ 9818-2015 для марша используется диапазон 3-18 подъемов.',
@@ -54,9 +52,6 @@ const PARAMETER_HINTS = {
 
 const RESULT_TABS = [
   { id: 'input-parameters', label: 'Ввод параметров' },
-  { id: 'side-view', label: 'Вид сбоку' },
-  { id: 'top-view', label: 'Вид сверху' },
-  { id: 'three-d', label: '3D-визуализация' },
   { id: 'parameters', label: 'Параметры' },
   { id: 'checks', label: 'Проверки' },
   { id: 'export', label: 'Экспорт' },
@@ -64,7 +59,7 @@ const RESULT_TABS = [
 
 const INITIAL_FORM = {
   height: 3000,
-  floors: 3,
+  floors: 2,
   flightWidth: 900,
   openingLength: 4200,
   useAutoSteps: true,
@@ -80,9 +75,6 @@ const INITIAL_FORM = {
   outerRadius: 1000,
   innerRadius: 200,
   spiralStepsPerTurn: 12,
-  headroom: 2100,
-  railingHeight: 900,
-  fireType: 'Л1 с окнами',
 };
 
 /**
@@ -535,18 +527,19 @@ const prepareCanvas = (canvas) => {
  * @param {number} y1 - Начальная координата Y.
  * @param {number} x2 - Конечная координата X.
  * @param {number} y2 - Конечная координата Y.
+ * @param {number} [uiScale=1] - Коэффициент масштабирования UI.
  * @returns {void}
  */
-const drawDimension = (ctx, text, x1, y1, x2, y2) => {
+const drawDimension = (ctx, text, x1, y1, x2, y2, uiScale = 1) => {
   ctx.save();
   ctx.strokeStyle = '#64748b';
   ctx.fillStyle = '#334155';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = uiScale;
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
   ctx.stroke();
-  ctx.fillText(text, (x1 + x2) / 2 + 6, (y1 + y2) / 2 - 6);
+  ctx.fillText(text, (x1 + x2) / 2 + 6 * uiScale, (y1 + y2) / 2 - 6 * uiScale);
   ctx.restore();
 };
 
@@ -566,7 +559,8 @@ const drawProfile = (canvas, form, geometry) => {
 
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
-  const padding = 44;
+  const uiScale = scalePx(1);
+  const padding = scalePx(44);
   const horizontalRun = form.shape === 'spiral' ? geometry.safeSteps * geometry.spiralLineTread : geometry.flightLength;
   const scale = Math.min((width - padding * 2) / horizontalRun, (height - padding * 2) / geometry.totalRise);
   const baseX = padding;
@@ -574,26 +568,26 @@ const drawProfile = (canvas, form, geometry) => {
   const topY = baseY - geometry.totalRise * scale;
   const endX = baseX + horizontalRun * scale;
 
-  ctx.font = '13px Arial';
+  ctx.font = `${Math.round(scalePx(CANVAS_FONT_SIZE))}px Arial`;
   ctx.lineCap = 'round';
   ctx.fillStyle = '#f8fafc';
   ctx.fillRect(0, 0, width, height);
 
   ctx.strokeStyle = '#94a3b8';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * uiScale;
   ctx.beginPath();
-  ctx.moveTo(baseX - 12, baseY);
-  ctx.lineTo(endX + 50, baseY);
-  ctx.moveTo(endX - 20, topY);
-  ctx.lineTo(endX + 90, topY);
+  ctx.moveTo(baseX - 12 * uiScale, baseY);
+  ctx.lineTo(endX + 50 * uiScale, baseY);
+  ctx.moveTo(endX - 20 * uiScale, topY);
+  ctx.lineTo(endX + 90 * uiScale, topY);
   ctx.stroke();
 
   ctx.fillStyle = '#0f172a';
-  ctx.fillText('Чистый пол нижнего этажа', baseX, baseY + 24);
-  ctx.fillText('Чистый пол верхнего этажа (не ступень)', endX - 140, topY - 12);
+  ctx.fillText('Чистый пол нижнего этажа', baseX, baseY + 24 * uiScale);
+  ctx.fillText('Чистый пол верхнего этажа (не ступень)', endX - 140 * uiScale, topY - 12 * uiScale);
 
   ctx.strokeStyle = '#0ea5e9';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * uiScale;
   ctx.beginPath();
   ctx.moveTo(baseX, baseY);
   const profileStepRun = horizontalRun / Math.max(geometry.safeSteps, 1);
@@ -609,21 +603,21 @@ const drawProfile = (canvas, form, geometry) => {
   ctx.stroke();
 
   ctx.strokeStyle = '#f97316';
-  ctx.setLineDash([6, 6]);
+  ctx.setLineDash([6 * uiScale, 6 * uiScale]);
   ctx.beginPath();
   ctx.moveTo(baseX, baseY);
   ctx.lineTo(endX, topY);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  drawDimension(ctx, `H = ${formatNumber(geometry.totalRise)} мм`, baseX - 22, baseY, baseX - 22, topY);
-  drawDimension(ctx, `L = ${formatNumber(horizontalRun)} мм`, baseX, baseY + 36, endX, baseY + 36);
+  drawDimension(ctx, `H = ${formatNumber(geometry.totalRise)} мм`, baseX - 22 * uiScale, baseY, baseX - 22 * uiScale, topY, uiScale);
+  drawDimension(ctx, `L = ${formatNumber(horizontalRun)} мм`, baseX, baseY + 36 * uiScale, endX, baseY + 36 * uiScale, uiScale);
 
   ctx.fillStyle = '#334155';
-  ctx.fillText(`h = ${formatNumber(geometry.riser, 1)} мм`, baseX + 12, topY + 32);
-  ctx.fillText(`b = ${formatNumber(geometry.activeTread, 1)} мм`, baseX + 120, topY + 32);
-  ctx.fillText(`угол = ${formatNumber(form.shape === 'spiral' ? geometry.spiralSlopeAngle : geometry.slopeAngle, 1)}°`, baseX + 230, topY + 32);
-  ctx.fillText(`W = ${formatNumber(form.treadThickness)} мм, F = ${formatNumber(form.treadOverhang)} мм, T = ${formatNumber(form.stringerThickness)} мм`, baseX + 12, topY + 52);
+  ctx.fillText(`h = ${formatNumber(geometry.riser, 1)} мм`, baseX + 12 * uiScale, topY + 32 * uiScale);
+  ctx.fillText(`b = ${formatNumber(geometry.activeTread, 1)} мм`, baseX + 120 * uiScale, topY + 32 * uiScale);
+  ctx.fillText(`угол = ${formatNumber(form.shape === 'spiral' ? geometry.spiralSlopeAngle : geometry.slopeAngle, 1)}°`, baseX + 230 * uiScale, topY + 32 * uiScale);
+  ctx.fillText(`W = ${formatNumber(form.treadThickness)} мм, F = ${formatNumber(form.treadOverhang)} мм, T = ${formatNumber(form.stringerThickness)} мм`, baseX + 12 * uiScale, topY + 52 * uiScale);
 };
 
 /**
@@ -635,12 +629,13 @@ const drawProfile = (canvas, form, geometry) => {
  * @param {number} width - Ширина марша на чертеже.
  * @param {number} steps - Количество подъемов.
  * @param {'horizontal'|'vertical'} direction - Направление марша.
+ * @param {number} [uiScale=1] - Коэффициент масштабирования UI.
  * @returns {void}
  */
-const drawFlightPlan = (ctx, x, y, length, width, steps, direction = 'horizontal') => {
+const drawFlightPlan = (ctx, x, y, length, width, steps, direction = 'horizontal', uiScale = 1) => {
   ctx.strokeStyle = '#0ea5e9';
   ctx.fillStyle = 'rgba(14, 165, 233, 0.08)';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * uiScale;
   ctx.strokeRect(x, y, length, width);
   ctx.fillRect(x, y, length, width);
 
@@ -670,9 +665,10 @@ const drawFlightPlan = (ctx, x, y, length, width, steps, direction = 'horizontal
  * @param {number} cy - Центр окружностей Y.
  * @param {number} scale - Масштаб чертежа.
  * @param {object} geometry - Рассчитанные параметры.
+ * @param {number} [uiScale=1] - Коэффициент масштабирования UI.
  * @returns {void}
  */
-const drawSpiralPlan = (ctx, cx, cy, scale, geometry) => {
+const drawSpiralPlan = (ctx, cx, cy, scale, geometry, uiScale = 1) => {
   const inner = geometry.innerRadius * scale;
   const outer = geometry.outerRadius * scale;
   const walk = geometry.walkingRadius * scale;
@@ -681,7 +677,7 @@ const drawSpiralPlan = (ctx, cx, cy, scale, geometry) => {
 
   ctx.strokeStyle = '#0ea5e9';
   ctx.fillStyle = 'rgba(14, 165, 233, 0.08)';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * uiScale;
   ctx.beginPath();
   ctx.arc(cx, cy, outer, 0, Math.PI * 2);
   ctx.arc(cx, cy, inner, 0, Math.PI * 2, true);
@@ -689,7 +685,7 @@ const drawSpiralPlan = (ctx, cx, cy, scale, geometry) => {
   ctx.stroke();
 
   ctx.strokeStyle = '#f97316';
-  ctx.setLineDash([6, 5]);
+  ctx.setLineDash([6 * uiScale, 5 * uiScale]);
   ctx.beginPath();
   ctx.arc(cx, cy, walk, 0, Math.PI * 2);
   ctx.stroke();
@@ -704,9 +700,9 @@ const drawSpiralPlan = (ctx, cx, cy, scale, geometry) => {
     ctx.stroke();
   }
 
-  drawDimension(ctx, `Rвнут = ${formatNumber(geometry.innerRadius)} мм`, cx, cy, cx + inner, cy);
-  drawDimension(ctx, `Rход = ${formatNumber(geometry.walkingRadius)} мм`, cx, cy + 16, cx + walk, cy + 16);
-  drawDimension(ctx, `Rвнеш = ${formatNumber(geometry.outerRadius)} мм`, cx, cy + 32, cx + outer, cy + 32);
+  drawDimension(ctx, `Rвнут = ${formatNumber(geometry.innerRadius)} мм`, cx, cy, cx + inner, cy, uiScale);
+  drawDimension(ctx, `Rход = ${formatNumber(geometry.walkingRadius)} мм`, cx, cy + 16 * uiScale, cx + walk, cy + 16 * uiScale, uiScale);
+  drawDimension(ctx, `Rвнеш = ${formatNumber(geometry.outerRadius)} мм`, cx, cy + 32 * uiScale, cx + outer, cy + 32 * uiScale, uiScale);
 };
 
 /**
@@ -725,7 +721,8 @@ const drawPlan = (canvas, form, geometry) => {
 
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
-  const padding = 44;
+  const uiScale = scalePx(1);
+  const padding = scalePx(44);
   const scale = Math.min((width - padding * 2) / geometry.planLength, (height - padding * 2) / geometry.planWidth);
   const originX = padding;
   const originY = padding;
@@ -733,19 +730,19 @@ const drawPlan = (canvas, form, geometry) => {
   const flightLength = geometry.flightLength * scale;
   const landing = geometry.landingLength * scale;
 
-  ctx.font = '13px Arial';
+  ctx.font = `${Math.round(scalePx(CANVAS_FONT_SIZE))}px Arial`;
   ctx.fillStyle = '#f8fafc';
   ctx.fillRect(0, 0, width, height);
 
   if (form.shape === 'spiral') {
-    drawSpiralPlan(ctx, width / 2, height / 2, scale, geometry);
+    drawSpiralPlan(ctx, width / 2, height / 2, scale, geometry, uiScale);
     return;
   }
 
   if (form.shape === 'straight') {
-    drawFlightPlan(ctx, originX, originY + flightWidth / 2, flightLength, flightWidth, geometry.safeSteps);
-    drawDimension(ctx, `${formatNumber(geometry.flightLength)} мм`, originX, originY + flightWidth * 1.8, originX + flightLength, originY + flightWidth * 1.8);
-    drawDimension(ctx, `${formatNumber(form.flightWidth)} мм`, originX - 16, originY + flightWidth / 2, originX - 16, originY + flightWidth * 1.5);
+    drawFlightPlan(ctx, originX, originY + flightWidth / 2, flightLength, flightWidth, geometry.safeSteps, 'horizontal', uiScale);
+    drawDimension(ctx, `${formatNumber(geometry.flightLength)} мм`, originX, originY + flightWidth * 1.8, originX + flightLength, originY + flightWidth * 1.8, uiScale);
+    drawDimension(ctx, `${formatNumber(form.flightWidth)} мм`, originX - 16 * uiScale, originY + flightWidth / 2, originX - 16 * uiScale, originY + flightWidth * 1.5, uiScale);
     return;
   }
 
@@ -754,18 +751,19 @@ const drawPlan = (canvas, form, geometry) => {
     const firstFlightLength = marchRun * (geometry.firstFlightSteps / Math.max(geometry.firstFlightSteps + geometry.secondFlightSteps, 1));
     const secondFlightLength = Math.max(marchRun - firstFlightLength, flightWidth);
 
-    drawFlightPlan(ctx, originX, originY + landing, firstFlightLength, flightWidth, geometry.firstFlightSteps);
-    drawFlightPlan(ctx, originX + firstFlightLength, originY, secondFlightLength, flightWidth, geometry.secondFlightSteps, 'vertical');
+    drawFlightPlan(ctx, originX, originY + landing, firstFlightLength, flightWidth, geometry.firstFlightSteps, 'horizontal', uiScale);
+    drawFlightPlan(ctx, originX + firstFlightLength, originY, secondFlightLength, flightWidth, geometry.secondFlightSteps, 'vertical', uiScale);
     ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 2 * uiScale;
     ctx.strokeRect(originX + firstFlightLength, originY + landing, landing, flightWidth);
-    ctx.fillText(`Площадка ${formatNumber(geometry.landingLength)}×${formatNumber(form.flightWidth)} мм`, originX + firstFlightLength + 8, originY + landing + 22);
+    ctx.fillText(`Площадка ${formatNumber(geometry.landingLength)}×${formatNumber(form.flightWidth)} мм`, originX + firstFlightLength + 8 * uiScale, originY + landing + 22 * uiScale);
   } else if (form.shape === 'u-platform') {
     const marchRun = Math.max(geometry.flightLength - geometry.landingLength, 1) * scale;
     const totalSteps = Math.max(geometry.firstFlightSteps + geometry.secondFlightSteps, 1);
     const firstFlightLength = marchRun * (geometry.firstFlightSteps / totalSteps);
     const secondFlightLength = Math.max(marchRun - firstFlightLength, flightWidth);
 
-    drawFlightPlan(ctx, originX, originY + flightWidth, firstFlightLength, flightWidth, geometry.firstFlightSteps);
+    drawFlightPlan(ctx, originX, originY + flightWidth, firstFlightLength, flightWidth, geometry.firstFlightSteps, 'horizontal', uiScale);
     drawFlightPlan(
       ctx,
       originX + firstFlightLength - secondFlightLength,
@@ -773,14 +771,17 @@ const drawPlan = (canvas, form, geometry) => {
       secondFlightLength,
       flightWidth,
       geometry.secondFlightSteps,
+      'horizontal',
+      uiScale,
     );
     ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 2 * uiScale;
     ctx.strokeRect(originX + firstFlightLength, originY, landing, flightWidth * 2);
-    ctx.fillText(`Площадка ${formatNumber(geometry.landingLength)} мм`, originX + firstFlightLength + 8, originY + flightWidth);
+    ctx.fillText(`Площадка ${formatNumber(geometry.landingLength)} мм`, originX + firstFlightLength + 8 * uiScale, originY + flightWidth);
   }
 
-  drawDimension(ctx, `Габарит ${formatNumber(geometry.planLength)} мм`, originX, height - 28, originX + geometry.planLength * scale, height - 28);
-  drawDimension(ctx, `Ширина ${formatNumber(geometry.planWidth)} мм`, width - 32, originY, width - 32, originY + geometry.planWidth * scale);
+  drawDimension(ctx, `Габарит ${formatNumber(geometry.planLength)} мм`, originX, height - 28 * uiScale, originX + geometry.planLength * scale, height - 28 * uiScale, uiScale);
+  drawDimension(ctx, `Ширина ${formatNumber(geometry.planWidth)} мм`, width - 32 * uiScale, originY, width - 32 * uiScale, originY + geometry.planWidth * scale, uiScale);
 };
 
 /**
@@ -815,66 +816,12 @@ const getStatusIcon = (status) => {
  * @returns {JSX.Element} Название параметра с интерактивной подсказкой.
  */
 const renderParameterHeader = (label, hint) => (
-  <span className="parameter-hint" tabIndex="0" aria-label={`${label}: ${hint}`} title={hint}>
+  <span className="parameter-hint" tabIndex="0" aria-label={`${label}: ${hint}`}>
     <span className="parameter-hint__label">{label}</span>
     <span className="parameter-hint__icon" aria-hidden="true">?</span>
     <span className="parameter-hint__bubble" role="tooltip">{hint}</span>
   </span>
 );
-
-/**
- * Возвращает расчетные параметры, которые относятся именно к выбранной форме лестницы.
- * Используется в форме, чтобы ошибки по винтовым элементам были связаны с видимыми значениями.
- * @param {object} form - Текущие значения формы.
- * @param {object} geometry - Рассчитанная геометрия лестницы.
- * @returns {Array<{label: string, value: string, note: string}>} Список параметров выбранной формы для вывода.
- */
-const buildShapeParameters = (form, geometry) => {
-  if (form.shape === 'spiral') {
-    return [
-      { label: 'Этажей', value: `${geometry.floorCount} шт.`, note: 'Общий подъём = H × (этажей − 1)' },
-      { label: 'Подъёмов n', value: `${geometry.safeSteps} шт.`, note: 'На всю высоту лестницы' },
-      { label: 'Расчетная длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Диаметр по внешнему радиусу, только для чтения' },
-      { label: 'Проступь по линии хода', value: `${formatNumber(geometry.spiralLineTread, 1)} мм`, note: 'Минимум 180 мм' },
-      { label: 'Узкая часть ступени', value: `${formatNumber(geometry.spiralNarrowEnd, 1)} мм`, note: 'Минимум 100 мм' },
-      { label: 'Высота между витками', value: `${formatNumber(geometry.spiralHeadroom)} мм`, note: 'Минимум 2000 мм' },
-      { label: 'Внутренний радиус', value: `${formatNumber(geometry.innerRadius)} мм`, note: 'Задается в форме' },
-      { label: 'Внешний радиус', value: `${formatNumber(geometry.outerRadius)} мм`, note: 'Задается в форме' },
-      { label: 'Радиус линии хода', value: `${formatNumber(geometry.walkingRadius)} мм`, note: 'Расчетное значение' },
-    ];
-  }
-
-  if (form.shape.includes('platform')) {
-    const flightSummary = geometry.flightCount > 2
-      ? `${geometry.flightCount} маршей: ${geometry.flightStepsList.join(' + ')}`
-      : `${geometry.firstFlightSteps} + ${geometry.secondFlightSteps}`;
-
-    return [
-      { label: 'Этажей', value: `${geometry.floorCount} шт.`, note: 'Общий подъём = H × (этажей − 1)' },
-      { label: 'Маршей', value: `${geometry.flightCount} шт.`, note: flightSummary },
-      { label: 'Длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Задается полем L' },
-      { label: 'Глубина проступи', value: `${formatNumber(geometry.tread, 1)} мм`, note: 'Обязательный диапазон: 260-300 мм' },
-      { label: 'Размер площадки', value: `${formatNumber(geometry.landingLength)} мм`, note: 'Не меньше ширины марша' },
-      { label: 'Поворот лестницы', value: `${geometry.turnAngle}°`, note: 'Зависит от формы' },
-    ];
-  }
-
-  if (form.shape === 'straight' && geometry.flightCount > 1) {
-    return [
-      { label: 'Этажей', value: `${geometry.floorCount} шт.`, note: 'Общий подъём = H × (этажей − 1)' },
-      { label: 'Маршей', value: `${geometry.flightCount} шт.`, note: geometry.flightStepsList.join(' + ') },
-      { label: 'Длина проема L', value: `${formatNumber(geometry.flightLength)} мм`, note: 'На один пролёт' },
-      { label: 'Глубина проступи', value: `${formatNumber(geometry.tread, 1)} мм`, note: 'Обязательный диапазон: 260-300 мм' },
-      { label: 'Габарит плана', value: `${formatNumber(geometry.planLength)} × ${formatNumber(geometry.planWidth)} мм`, note: 'Расчетный размер сверху' },
-    ];
-  }
-
-  return [
-    { label: 'Длина марша', value: `${formatNumber(geometry.flightLength)} мм`, note: 'Задается полем L' },
-    { label: 'Глубина проступи', value: `${formatNumber(geometry.tread, 1)} мм`, note: 'Обязательный диапазон: 260-300 мм' },
-    { label: 'Габарит плана', value: `${formatNumber(geometry.planLength)} × ${formatNumber(geometry.planWidth)} мм`, note: 'Расчетный размер сверху' },
-  ];
-};
 
 /**
  * Форматирует компонентную конфигурацию для JSON-редактора.
@@ -989,26 +936,18 @@ const useStairStore = create((set) => ({
  */
 const App = () => {
   const activeResultTab = useStairStore((state) => state.activeResultTab);
-  const componentJson = useStairStore((state) => state.componentJson);
-  const componentJsonError = useStairStore((state) => state.componentJsonError);
-  const customComponents = useStairStore((state) => state.customComponents);
   const form = useStairStore((state) => state.form);
   const generatedComponents = useStairStore((state) => state.generatedComponents);
   const geometry = useStairStore((state) => state.geometry);
-  const isCustomConfig = useStairStore((state) => state.isCustomConfig);
-  const resetComponents = useStairStore((state) => state.resetComponents);
   const setActiveResultTab = useStairStore((state) => state.setActiveResultTab);
-  const setComponentJson = useStairStore((state) => state.setComponentJson);
   const setForm = useStairStore((state) => state.setForm);
   const profileCanvasRef = useRef(null);
   const planCanvasRef = useRef(null);
-  const activeComponents = isCustomConfig ? customComponents : generatedComponents;
   const report = useMemo(() => buildChecks(form, geometry), [form, geometry]);
   const selectedShape = SHAPES.find((shape) => shape.value === form.shape)?.label;
   const selectedMaterial = MATERIALS.find((material) => material.value === form.material)?.label;
   const isSpiral = form.shape === 'spiral';
   const canUseAutoSteps = isFieldVisible(form.shape, 'autoSteps');
-  const shapeParameters = useMemo(() => buildShapeParameters(form, geometry), [form, geometry]);
   const exportData = useMemo(() => ({
     form,
     geometry,
@@ -1108,40 +1047,81 @@ const App = () => {
     window.addEventListener('resize', handleDraw);
 
     return () => window.removeEventListener('resize', handleDraw);
-  }, [activeResultTab, form, geometry]);
+  }, [form, geometry]);
+
+  /**
+   * Рендерит навигацию по вкладкам калькулятора.
+   * @param {string} [extraClassName] - Дополнительные CSS-классы контейнера вкладок.
+   * @returns {JSX.Element} Панель переключения разделов.
+   */
+  const renderResultTabs = (extraClassName = '') => (
+    <nav
+      aria-label="Разделы калькулятора"
+      className={extraClassName ? `result-tabs no-print ${extraClassName}` : 'result-tabs no-print'}
+    >
+      {RESULT_TABS.map((tab) => (
+        <button
+          aria-current={activeResultTab === tab.id ? 'page' : undefined}
+          className={activeResultTab === tab.id ? 'result-tabs__button result-tabs__button--active' : 'result-tabs__button'}
+          key={tab.id}
+          onClick={() => handleResultTabClick(tab.id)}
+          type="button"
+        >
+          {tab.label}
+        </button>
+      ))}
+    </nav>
+  );
+
+  /**
+   * Рендерит блок итогового заключения с проверками и дополнительной информацией.
+   * @param {string} className - CSS-классы контейнера итога.
+   * @returns {JSX.Element} Секция с результатом расчёта.
+   */
+  const renderSummarySection = (className) => (
+    <section className={className} aria-label="Итоговое заключение">
+      <h2 className="summary__title">Итог</h2>
+      <p className={report.errors.length ? 'summary__result summary__result--error' : 'summary__result summary__result--ok'}>
+        {report.errors.length ? 'Не соответствует: требуется исправить ошибки' : 'Соответствует нормам'}
+      </p>
+
+      <details className="summary__details">
+        <summary className="summary__details-summary">Дополнительная информация</summary>
+        <div className="summary__details-body">
+          {report.errors.length > 0 && (
+            <div className="summary__errors" aria-label="Ошибки, которые необходимо исправить">
+              <h3 className="summary__subtitle">Что необходимо исправить</h3>
+              <ul className="summary__list">
+                {report.errors.map((error) => (
+                  <li key={error.title}>
+                    <strong>{error.title}</strong>
+                    <span>Сейчас: {error.value}</span>
+                    <span>Требуется: {error.note}</span>
+                    {error.fix && <span className="summary__fix">Как исправить: {error.fix}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="summary__note">
+            Верхний этаж не считается ступенью: при n = {geometry.safeSteps} физических подъемов точка выхода находится
+            на следующем уровне чистого пола.
+          </p>
+        </div>
+      </details>
+    </section>
+  );
 
   return (
     <main className="app">
-      <section className="hero">
-        <div>
-          <p className="hero__eyebrow">СП 55.13330.2016 · ГОСТ 9818-2015 · СП 1.13130.2020</p>
-          <h1 className="hero__title">Калькулятор лестниц для частного жилого дома</h1>
-          <p className="hero__text">
-            Мягкая проверка норм для домов до 3 этажей: маршевые и винтовые лестницы,
-            материалы дерево, сталь и железобетон. Пожарный тип по умолчанию: {form.fireType}.
-          </p>
-        </div>
-        <div className={report.errors.length ? 'hero__status hero__status--error' : 'hero__status hero__status--ok'}>
-          {report.errors.length ? 'Есть ошибки' : 'Соответствует нормам'}
-        </div>
-      </section>
+      {activeResultTab !== 'input-parameters' && renderResultTabs()}
 
-      <nav className="result-tabs no-print" aria-label="Разделы калькулятора">
-        {RESULT_TABS.map((tab) => (
-          <button
-            aria-current={activeResultTab === tab.id ? 'page' : undefined}
-            className={activeResultTab === tab.id ? 'result-tabs__button result-tabs__button--active' : 'result-tabs__button'}
-            key={tab.id}
-            onClick={() => handleResultTabClick(tab.id)}
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-
-      <section className={activeResultTab === 'input-parameters' ? 'layout result-panel result-panel--active' : 'layout result-panel'}>
-        <form className="card form" aria-label="Параметры лестницы">
+      <section className={activeResultTab === 'input-parameters' ? 'layout layout--primary result-panel result-panel--active' : 'layout layout--primary result-panel'}>
+        <div className="layout--primary__sidebar">
+        <div className="layout--primary__sidebar-stack">
+        {activeResultTab === 'input-parameters' && renderResultTabs('layout--primary__tabs')}
+        <form className="card form layout--primary__form" aria-label="Параметры лестницы">
           <div className="form__grid">
             <label className="field">
               <span className="field__label">Форма лестницы</span>
@@ -1323,7 +1303,7 @@ const App = () => {
               </select>
             </label>
 
-            <details className="additional-params form__wide" open>
+            <details className="additional-params form__wide">
               <summary className="additional-params__summary">Дополнительные параметры</summary>
               <div className="additional-params__grid">
                 <label className="field">
@@ -1371,84 +1351,37 @@ const App = () => {
             </details>
 
           </div>
-
-          <section className="shape-params" aria-label="Расчетные параметры выбранной формы лестницы">
-            <h2 className="shape-params__title">Параметры выбранной формы</h2>
-            <div className="shape-params__grid">
-              {shapeParameters.map((parameter) => (
-                <article className="shape-params__item" key={parameter.label}>
-                  <span className="shape-params__label">{parameter.label}</span>
-                  <strong className="shape-params__value">{parameter.value}</strong>
-                  <span className="shape-params__note">{parameter.note}</span>
-                </article>
-              ))}
-            </div>
-          </section>
         </form>
+        </div>
+        </div>
 
-        <section className="card summary" aria-label="Итоговое заключение">
-          <h2>Итог</h2>
-          <p className={report.errors.length ? 'summary__result summary__result--error' : 'summary__result summary__result--ok'}>
-            {report.errors.length ? 'Не соответствует: требуется исправить ошибки' : 'Соответствует нормам'}
-          </p>
-
-          {report.errors.length > 0 && (
-            <div className="summary__errors" aria-label="Ошибки, которые необходимо исправить">
-              <h3 className="summary__subtitle">Что необходимо исправить</h3>
-              <ul className="summary__list">
-                {report.errors.map((error) => (
-                  <li key={error.title}>
-                    <strong>{error.title}</strong>
-                    <span>Сейчас: {error.value}</span>
-                    <span>Требуется: {error.note}</span>
-                    {error.fix && <span className="summary__fix">Как исправить: {error.fix}</span>}
-                  </li>
-                ))}
-              </ul>
+        <div className="layout--primary__visual-column">
+          {activeResultTab === 'input-parameters' && (
+            <div className="app-summary-slot">
+              {renderSummarySection('card summary app-summary')}
             </div>
           )}
-
-          <p className="summary__note">
-            Верхний этаж не считается ступенью: при n = {geometry.safeSteps} физических подъемов точка выхода находится
-            на следующем уровне чистого пола.
-          </p>
-        </section>
+          <div className="visualization-3d">
+            <Staircase3D
+              components={generatedComponents}
+              form={form}
+            />
+          </div>
+        </div>
       </section>
 
-      <section className={activeResultTab === 'side-view' ? 'drawings result-panel result-panel--active' : 'drawings result-panel'}>
-        <article className="card drawing">
-          <h2>Вид сбоку</h2>
-          <canvas ref={profileCanvasRef} aria-label="Canvas с профилем лестницы" />
-        </article>
-      </section>
+      <div className="drawings-canvas-host" aria-hidden="true">
+        <canvas ref={profileCanvasRef} aria-label="Canvas с профилем лестницы" />
+        <canvas ref={planCanvasRef} aria-label="Canvas с планом лестницы" />
+      </div>
 
-      <section className={activeResultTab === 'top-view' ? 'drawings result-panel result-panel--active' : 'drawings result-panel'}>
-        <article className="card drawing">
-          <h2>Вид сверху</h2>
-          <canvas ref={planCanvasRef} aria-label="Canvas с планом лестницы" />
-        </article>
-      </section>
-
-      <section className={activeResultTab === 'three-d' ? 'drawings result-panel result-panel--active' : 'drawings result-panel'}>
-        <Staircase3D
-          componentJson={componentJson}
-          componentJsonError={componentJsonError}
-          components={activeComponents}
-          form={form}
-          isCustomConfig={isCustomConfig}
-          onComponentJsonChange={setComponentJson}
-          onResetComponents={resetComponents}
-        />
-      </section>
-
-      <section className={activeResultTab === 'parameters' ? 'card table-card result-panel result-panel--active' : 'card table-card result-panel'}>
+      <section className={activeResultTab === 'parameters' ? 'card table-card parameters-panel result-panel result-panel--active' : 'card table-card parameters-panel result-panel'}>
         <h2>Введенные и рассчитанные параметры</h2>
         <div className="table-wrap">
           <table>
             <tbody>
               <tr><th>{renderParameterHeader('Форма', PARAMETER_HINTS.form)}</th><td>{selectedShape}</td></tr>
               <tr><th>{renderParameterHeader('Материал', PARAMETER_HINTS.material)}</th><td>{selectedMaterial}</td></tr>
-              <tr><th>{renderParameterHeader('Пожарный тип', PARAMETER_HINTS.fireType)}</th><td>{form.fireType}</td></tr>
               <tr><th>{renderParameterHeader('Толщина ступеней W', PARAMETER_HINTS.treadThickness)}</th><td>{formatNumber(form.treadThickness)} мм</td></tr>
               <tr><th>{renderParameterHeader('Свес проступи F', PARAMETER_HINTS.treadOverhang)}</th><td>{formatNumber(form.treadOverhang)} мм</td></tr>
               <tr><th>{renderParameterHeader(isSpiral ? 'Толщина центральной стойки T' : 'Толщина тетивы / косоура T', PARAMETER_HINTS.stringerThickness)}</th><td>{formatNumber(form.stringerThickness)} мм</td></tr>
