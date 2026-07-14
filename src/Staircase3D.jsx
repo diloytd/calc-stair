@@ -1,4 +1,4 @@
-import { OrbitControls, Text } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -104,51 +104,6 @@ const getFlightMarchLength = (component) => {
 };
 
 /**
- * Рисует метки сторон 1–4 на верхней поверхности прямоугольной площадки.
- * В локальной СК блока: 1 — ближний край (min X), 2 — правый (+Z), 3 — дальний (+X), 4 — левый (−Z).
- * @param {object} props - Свойства меток.
- * @param {number} props.centerX - Центр площадки по локальной оси X в миллиметрах.
- * @param {number} props.centerZ - Центр площадки по локальной оси Z в миллиметрах.
- * @param {number} props.length - Длина площадки вдоль локальной оси X в миллиметрах.
- * @param {number} props.width - Ширина площадки вдоль локальной оси Z в миллиметрах.
- * @param {number} props.topY - Y верхней поверхности площадки в миллиметрах.
- * @returns {JSX.Element} Четыре текстовые метки на краях площадки.
- */
-const PlatformSideLabels = ({ centerX, centerZ, length, width, topY }) => {
-  const halfLength = length / 2;
-  const halfWidth = width / 2;
-  const minX = centerX - halfLength;
-  const maxX = centerX + halfLength;
-  const minZ = centerZ - halfWidth;
-  const maxZ = centerZ + halfWidth;
-  const inset = Math.min(Math.max(length, width) * 0.12, 120);
-  const labelY = topY + 4;
-  const fontSize = Math.min(Math.max(length, width) * 0.22, 180);
-  const sides = [
-    { label: '1', position: [minX + inset, labelY, centerZ], rotation: [-Math.PI / 2, 0, Math.PI] },
-    { label: '2', position: [centerX, labelY, maxZ - inset], rotation: [-Math.PI / 2, 0, Math.PI / 2] },
-    { label: '3', position: [maxX - inset, labelY, centerZ], rotation: [-Math.PI / 2, 0, 0] },
-    { label: '4', position: [centerX, labelY, minZ + inset], rotation: [-Math.PI / 2, 0, -Math.PI / 2] },
-  ];
-
-  return sides.map(({ label, position, rotation }) => (
-    <Text
-      anchorX="center"
-      anchorY="middle"
-      color="#b91c1c"
-      fontSize={fontSize}
-      key={label}
-      outlineColor="#ffffff"
-      outlineWidth={fontSize * 0.04}
-      position={position}
-      rotation={rotation}
-    >
-      {label}
-    </Text>
-  ));
-};
-
-/**
  * Рендерит один прямой марш прямоугольными ступенями под углом сборки.
  * @param {object} props - Свойства марша.
  * @param {object} props.component - Конфигурация компонента `march`.
@@ -250,13 +205,6 @@ const FlightBlock = ({ component, position, angleY, startStepIndex, materialProp
             <boxGeometry args={[platformLengthTotal, platform.thickness, platform.width]} />
             <meshStandardMaterial color="#dbeafe" roughness={0.72} metalness={0.05} />
           </mesh>
-          <PlatformSideLabels
-            centerX={platformCenterX}
-            centerZ={platformCenterZ}
-            length={platformLengthTotal}
-            topY={platformTopY}
-            width={platform.width}
-          />
         </>
       )}
     </group>
@@ -287,13 +235,6 @@ const Platform = ({ component, position, angleY, topStepIndex }) => {
           <boxGeometry args={[component.length, component.thickness, component.width]} />
           <meshStandardMaterial color="#dbeafe" roughness={0.72} metalness={0.05} />
         </mesh>
-        <PlatformSideLabels
-          centerX={0}
-          centerZ={0}
-          length={component.length}
-          topY={component.thickness / 2}
-          width={component.width}
-        />
       </group>
     </group>
   );
@@ -685,21 +626,13 @@ const SceneControls = ({ maxModelHeight, rendererRef, resetViewRef }) => {
  * @param {object} props - Свойства 3D-визуализации.
  * @param {object} props.form - Текущие параметры формы.
  * @param {Array<object>} props.components - Активная компонентная конфигурация лестницы.
- * @param {string} props.componentJson - Текст JSON-редактора.
- * @param {string} props.componentJsonError - Ошибка парсинга JSON, если есть.
- * @param {boolean} props.isCustomConfig - Используется ли ручная JSON-конфигурация.
- * @param {(value: string) => void} props.onComponentJsonChange - Обработчик изменения JSON.
- * @param {() => void} props.onResetComponents - Обработчик возврата к автогенерации.
- * @returns {JSX.Element} Карточка с интерактивной 3D-сценой и JSON-редактором.
+ * @param {object[]} props.components - Массив компонентов лестницы для 3D-сборки.
+ * @param {object} props.form - Параметры формы (материал и др.).
+ * @returns {JSX.Element} Карточка с интерактивной 3D-сценой.
  */
 const Staircase3D = ({
-  componentJson,
-  componentJsonError,
   components,
   form,
-  isCustomConfig,
-  onComponentJsonChange,
-  onResetComponents,
 }) => {
   const rendererRef = useRef(null);
   const resetViewRef = useRef(null);
@@ -741,21 +674,11 @@ const Staircase3D = ({
     link.click();
   };
 
-  /**
-   * Передает текст JSON в Zustand-store для парсинга и ручной сборки.
-   * @param {React.ChangeEvent<HTMLTextAreaElement>} event - Событие изменения textarea.
-   * @returns {void}
-   */
-  const handleJsonChange = (event) => {
-    onComponentJsonChange(event.target.value);
-  };
-
   return (
     <article className="card drawing drawing--3d">
       <div className="drawing__header">
         <div>
           <h2>3D-визуализация</h2>
-          <p className="drawing__note">React + R3F · Multi-floor · Flight / March / Platform / Spiral · v23</p>
         </div>
         <div className="drawing__actions">
           <button className="button" onClick={handleResetClick} type="button">Сбросить вид</button>
@@ -772,27 +695,6 @@ const Staircase3D = ({
           <SceneControls maxModelHeight={maxModelHeight} rendererRef={rendererRef} resetViewRef={resetViewRef} />
         </Canvas>
       </div>
-
-      <section className="config-editor" aria-label="JSON-редактор компонентной конфигурации">
-        <div className="config-editor__header">
-          <div>
-            <h3 className="config-editor__title">Компоненты лестницы JSON</h3>
-            <p className="config-editor__status">
-              {isCustomConfig ? 'Используется ручная конфигурация' : 'Автогенерация из параметров формы'}
-            </p>
-          </div>
-          <button className="button" onClick={onResetComponents} type="button">Сбросить к автогенерации</button>
-        </div>
-        <textarea
-          aria-invalid={componentJsonError ? 'true' : 'false'}
-          aria-label="JSON-массив компонентов лестницы"
-          className="config-editor__textarea"
-          onChange={handleJsonChange}
-          spellCheck="false"
-          value={componentJson}
-        />
-        {componentJsonError && <p className="config-editor__error">{componentJsonError}</p>}
-      </section>
     </article>
   );
 };

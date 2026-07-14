@@ -791,7 +791,6 @@ const buildParameterRows = (data) => {
   const rows = [
     { name: 'Форма', unit: '', value: selectedShape },
     { name: 'Материал', unit: '', value: selectedMaterial },
-    { name: 'Пожарный тип', unit: '', value: form.fireType },
     { name: 'Высота подъёма H', unit: 'мм', value: formatExportNumber(form.height) },
     { name: 'Количество подъёмов n', unit: 'шт.', value: formatExportNumber(geometry.safeSteps) },
     { name: 'Высота ступени h', unit: 'мм', value: formatExportNumber(geometry.riser, 1) },
@@ -808,7 +807,7 @@ const buildParameterRows = (data) => {
   ];
 
   if (!isSpiral) {
-    rows.splice(4, 0, { name: 'Ширина марша', unit: 'мм', value: formatExportNumber(form.flightWidth) });
+    rows.splice(3, 0, { name: 'Ширина марша', unit: 'мм', value: formatExportNumber(form.flightWidth) });
   }
 
   if (form.shape.includes('platform')) {
