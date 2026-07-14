@@ -1,4 +1,4 @@
-import { OrbitControls, Text } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -104,51 +104,6 @@ const getFlightMarchLength = (component) => {
 };
 
 /**
- * Рисует метки сторон 1–4 на верхней поверхности прямоугольной площадки.
- * В локальной СК блока: 1 — ближний край (min X), 2 — правый (+Z), 3 — дальний (+X), 4 — левый (−Z).
- * @param {object} props - Свойства меток.
- * @param {number} props.centerX - Центр площадки по локальной оси X в миллиметрах.
- * @param {number} props.centerZ - Центр площадки по локальной оси Z в миллиметрах.
- * @param {number} props.length - Длина площадки вдоль локальной оси X в миллиметрах.
- * @param {number} props.width - Ширина площадки вдоль локальной оси Z в миллиметрах.
- * @param {number} props.topY - Y верхней поверхности площадки в миллиметрах.
- * @returns {JSX.Element} Четыре текстовые метки на краях площадки.
- */
-const PlatformSideLabels = ({ centerX, centerZ, length, width, topY }) => {
-  const halfLength = length / 2;
-  const halfWidth = width / 2;
-  const minX = centerX - halfLength;
-  const maxX = centerX + halfLength;
-  const minZ = centerZ - halfWidth;
-  const maxZ = centerZ + halfWidth;
-  const inset = Math.min(Math.max(length, width) * 0.12, 120);
-  const labelY = topY + 4;
-  const fontSize = Math.min(Math.max(length, width) * 0.26, 200);
-  const sides = [
-    { label: '1', position: [minX + inset, labelY, centerZ], rotation: [-Math.PI / 2, 0, Math.PI] },
-    { label: '2', position: [centerX, labelY, maxZ - inset], rotation: [-Math.PI / 2, 0, Math.PI / 2] },
-    { label: '3', position: [maxX - inset, labelY, centerZ], rotation: [-Math.PI / 2, 0, 0] },
-    { label: '4', position: [centerX, labelY, minZ + inset], rotation: [-Math.PI / 2, 0, -Math.PI / 2] },
-  ];
-
-  return sides.map(({ label, position, rotation }) => (
-    <Text
-      anchorX="center"
-      anchorY="middle"
-      color="#b91c1c"
-      fontSize={fontSize}
-      key={label}
-      outlineColor="#ffffff"
-      outlineWidth={fontSize * 0.04}
-      position={position}
-      rotation={rotation}
-    >
-      {label}
-    </Text>
-  ));
-};
-
-/**
  * Рендерит один прямой марш прямоугольными ступенями под углом сборки.
  * @param {object} props - Свойства марша.
  * @param {object} props.component - Конфигурация компонента `march`.
@@ -250,13 +205,6 @@ const FlightBlock = ({ component, position, angleY, startStepIndex, materialProp
             <boxGeometry args={[platformLengthTotal, platform.thickness, platform.width]} />
             <meshStandardMaterial color="#dbeafe" roughness={0.72} metalness={0.05} />
           </mesh>
-          <PlatformSideLabels
-            centerX={platformCenterX}
-            centerZ={platformCenterZ}
-            length={platformLengthTotal}
-            topY={platformTopY}
-            width={platform.width}
-          />
         </>
       )}
     </group>
@@ -287,13 +235,6 @@ const Platform = ({ component, position, angleY, topStepIndex }) => {
           <boxGeometry args={[component.length, component.thickness, component.width]} />
           <meshStandardMaterial color="#dbeafe" roughness={0.72} metalness={0.05} />
         </mesh>
-        <PlatformSideLabels
-          centerX={0}
-          centerZ={0}
-          length={component.length}
-          topY={component.thickness / 2}
-          width={component.width}
-        />
       </group>
     </group>
   );
