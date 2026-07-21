@@ -2,15 +2,6 @@ import { useEffect, useMemo, useRef } from 'react';
 import { create } from 'zustand';
 import ExportPanel from './ExportPanel.jsx';
 import Staircase3D from './Staircase3D.jsx';
-import SimpleInputPanel from './components/SimpleInputPanel.jsx';
-import {
-  buildRiserHint,
-  buildSpiralHint,
-  buildStepsHint,
-  buildTreadHint,
-} from './engine/checkHints.js';
-import { calculatePrice, formatPrice } from './engine/priceCalculator.js';
-import { applySimpleInputToForm } from './engine/typeSuggest.js';
 import { CANVAS_FONT_SIZE, scalePx } from './uiScale.js';
 import { generateComponents } from './stairComponents.js';
 import {
@@ -32,7 +23,6 @@ const MATERIALS = [
   { value: 'wood', label: 'Дерево' },
   { value: 'steel', label: 'Сталь' },
   { value: 'concrete', label: 'Железобетон' },
-  { value: 'combined', label: 'Комбинированная' },
 ];
 
 const PARAMETER_HINTS = {
@@ -68,11 +58,10 @@ const RESULT_TABS = [
 ];
 
 const INITIAL_FORM = {
-  height: 2800,
+  height: 3000,
   floors: 2,
   flightWidth: 900,
   openingLength: 4200,
-  hasSpaceLimit: false,
   useAutoSteps: true,
   steps: 16,
   shape: 'straight',
@@ -377,17 +366,10 @@ const calculateGeometry = (form) => {
  * @param {string} title - Название проверки.
  * @param {string} value - Фактическое значение.
  * @param {string} note - Нормативное или рекомендованное условие.
- * @param {{ problem: string, action: string, possible: string }|null} [hint] - Подсказка простым языком.
+ * @param {string} [fix] - Подсказка, какие поля изменить для исправления ошибки.
  * @returns {object} Объект проверки для рендера.
  */
-const createCheck = (status, title, value, note, hint = null) => ({
-  status,
-  title,
-  value,
-  note,
-  hint,
-  fix: hint ? `${hint.problem} ${hint.action} ${hint.possible}` : '',
-});
+const createCheck = (status, title, value, note, fix = '') => ({ status, title, value, note, fix });
 
 /**
  * Формирует обязательные проверки и рекомендации по рассчитанной геометрии.
@@ -400,75 +382,72 @@ const buildChecks = (form, geometry) => {
   const checks = [];
   const isSpiral = form.shape === 'spiral';
   const isMarch = isMarchShape(form.shape);
-  const stepsStatus = geometry.flightCount > 1
-    ? (geometry.minStepsPerFlight >= 3 && geometry.maxStepsPerFlight <= 18 ? 'ok' : 'error')
-    : (isBetween(geometry.safeSteps, 3, 18) ? 'ok' : 'error');
-  const riserStatus = isBetween(geometry.riser, 150, 200) ? 'ok' : 'error';
-  const treadStatus = isBetween(geometry.tread, 260, 300) ? 'ok' : 'error';
+  const stepsFix = form.shape === 'straight'
+    ? 'Измените высоту подъема H, длину проема L или отключите авторасчет и задайте количество подъемов вручную.'
+    : 'Измените высоту подъема H или общее количество ступеней n.';
+  const treadFix = 'Измените длину проема L, количество подъемов n или распределение ступеней по маршам.';
 
   checks.push(
     createCheck(
-      stepsStatus,
+      geometry.flightCount > 1
+        ? (geometry.minStepsPerFlight >= 3 && geometry.maxStepsPerFlight <= 18 ? 'ok' : 'error')
+        : (isBetween(geometry.safeSteps, 3, 18) ? 'ok' : 'error'),
       'Число ступеней в марше',
       geometry.flightCount > 1
         ? `${geometry.maxStepsPerFlight} шт. макс. (${geometry.flightCount} маршей)`
         : `${geometry.safeSteps} шт.`,
-      'от 3 до 18 ступеней в каждом марше',
-      stepsStatus === 'error' ? buildStepsHint(form, geometry) : null,
+      'Обязательный диапазон: 3-18 на каждый марш',
+      stepsFix,
     ),
   );
   checks.push(
     createCheck(
-      riserStatus,
+      isBetween(geometry.riser, 150, 200) ? 'ok' : 'error',
       'Высота ступени',
       `${formatNumber(geometry.riser, 1)} мм`,
-      '150–200 мм на каждую ступень',
-      riserStatus === 'error' ? buildRiserHint(form, geometry) : null,
+      'Обязательный диапазон: 150-200 мм',
+      'Измените количество подъемов n или общую высоту подъема H.',
     ),
   );
 
   if (isMarch) {
     checks.push(
       createCheck(
-        treadStatus,
-        'Глубина ступени',
+        isBetween(geometry.tread, 260, 300) ? 'ok' : 'error',
+        'Глубина проступи маршевой лестницы',
         `${formatNumber(geometry.tread, 1)} мм`,
-        '260–300 мм по глубине',
-        treadStatus === 'error' ? buildTreadHint(form, geometry) : null,
+        'Обязательный диапазон: 260-300 мм',
+        treadFix,
       ),
     );
   }
 
   if (isSpiral) {
-    const spiralLineStatus = geometry.spiralLineTread >= 180 ? 'ok' : 'error';
-    const spiralNarrowStatus = geometry.spiralNarrowEnd >= 100 ? 'ok' : 'error';
-    const spiralHeadroomStatus = geometry.spiralHeadroom >= 2000 ? 'ok' : 'error';
-
     checks.push(
       createCheck(
-        spiralLineStatus,
-        'Винтовая: ширина ступени по ходу',
+        geometry.spiralLineTread >= 180 ? 'ok' : 'error',
+        'Винтовая: проступь по линии хода',
         `${formatNumber(geometry.spiralLineTread, 1)} мм`,
-        'не меньше 180 мм',
-        spiralLineStatus === 'error' ? buildSpiralHint('lineTread', form, geometry) : null,
+        'Минимум 180 мм',
+        'Увеличьте внешний радиус R, уменьшите внутренний радиус r или уменьшите количество ступеней на полный оборот.',
       ),
     );
     checks.push(
       createCheck(
-        spiralNarrowStatus,
-        'Винтовая: узкая часть у стойки',
+        geometry.spiralNarrowEnd >= 100 ? 'ok' : 'error',
+        'Винтовая: узкая часть',
         `${formatNumber(geometry.spiralNarrowEnd, 1)} мм`,
-        'не меньше 100 мм',
-        spiralNarrowStatus === 'error' ? buildSpiralHint('narrowEnd', form, geometry) : null,
+        'Минимум 100 мм',
+        'Увеличьте внутренний радиус r или уменьшите количество ступеней на полный оборот.',
       ),
     );
     checks.push(
       createCheck(
-        spiralHeadroomStatus,
+        geometry.spiralHeadroom >= 2000 ? 'ok' : 'error',
         'Винтовая: высота прохода между витками',
         `${formatNumber(geometry.spiralHeadroom, 0)} мм`,
-        'не меньше 2000 мм',
-        spiralHeadroomStatus === 'error' ? buildSpiralHint('headroom', form, geometry) : null,
+        'Минимум 2000 мм',
+        'Увеличьте высоту подъема H или уменьшите количество ступеней на полный оборот.',
       ),
     );
   }
@@ -965,7 +944,6 @@ const App = () => {
   const profileCanvasRef = useRef(null);
   const planCanvasRef = useRef(null);
   const report = useMemo(() => buildChecks(form, geometry), [form, geometry]);
-  const price = useMemo(() => calculatePrice(form, geometry, report), [form, geometry, report]);
   const selectedShape = SHAPES.find((shape) => shape.value === form.shape)?.label;
   const selectedMaterial = MATERIALS.find((material) => material.value === form.material)?.label;
   const isSpiral = form.shape === 'spiral';
@@ -980,15 +958,6 @@ const App = () => {
   }), [form, geometry, isSpiral, report, selectedMaterial, selectedShape]);
 
   /**
-   * Обновляет простой ввод и автоматически подбирает тип лестницы.
-   * @param {object} patch - Изменения от SimpleInputPanel.
-   * @returns {void}
-   */
-  const handleSimpleInputChange = (patch) => {
-    setForm((currentForm) => applySimpleInputToForm(currentForm, patch));
-  };
-
-  /**
    * Обновляет числовое поле формы с приведением к Number.
    * @param {React.ChangeEvent<HTMLInputElement>} event - Событие изменения поля.
    * @returns {void}
@@ -999,8 +968,6 @@ const App = () => {
 
     if (name === 'floors') {
       nextValue = Math.min(3, Math.max(2, Number.isFinite(nextValue) ? nextValue : 2));
-      setForm((currentForm) => applySimpleInputToForm(currentForm, { floors: nextValue }));
-      return;
     }
 
     setForm((currentForm) => ({
@@ -1030,6 +997,19 @@ const App = () => {
         useAutoSteps: nextShape === 'straight' ? currentForm.useAutoSteps : false,
       };
     });
+  };
+
+  /**
+   * Обновляет строковое поле формы.
+   * @param {React.ChangeEvent<HTMLSelectElement>} event - Событие изменения select.
+   * @returns {void}
+   */
+  const handleSelectChange = (event) => {
+    const { name, value } = event.target;
+    setForm((currentForm) => ({
+      ...currentForm,
+      [name]: value,
+    }));
   };
 
   /**
@@ -1101,22 +1081,13 @@ const App = () => {
   const renderSummarySection = (className) => (
     <section className={className} aria-label="Итоговое заключение">
       <h2 className="summary__title">Итог</h2>
-
-      <div className="summary__price" aria-live="polite">
-        <span className="summary__price-label">Стоимость:</span>
-        <p className="summary__price-value">
-          от {formatPrice(price.min)} до {formatPrice(price.max)}
-        </p>
-      </div>
-
       <p className={report.errors.length ? 'summary__result summary__result--error' : 'summary__result summary__result--ok'}>
-        {report.errors.length ? 'Не по нормам' : 'По нормам'}
+        {report.errors.length ? 'Не соответствует: требуется исправить ошибки' : 'Соответствует нормам'}
       </p>
 
       <details className="summary__details">
-        <summary className="summary__details-summary">Подробнее</summary>
+        <summary className="summary__details-summary">Дополнительная информация</summary>
         <div className="summary__details-body">
-          <p className="summary__price-note">{price.note}</p>
           {report.errors.length > 0 && (
             <div className="summary__errors" aria-label="Ошибки, которые необходимо исправить">
               <h3 className="summary__subtitle">Что необходимо исправить</h3>
@@ -1125,14 +1096,8 @@ const App = () => {
                   <li key={error.title}>
                     <strong>{error.title}</strong>
                     <span>Сейчас: {error.value}</span>
-                    <span>Норма: {error.note}</span>
-                    {error.hint && (
-                      <div className="summary__hint">
-                        <span><strong>Что не так:</strong> {error.hint.problem}</span>
-                        <span><strong>Что сделать:</strong> {error.hint.action}</span>
-                        <span><strong>Можно исправить:</strong> {error.hint.possible}</span>
-                      </div>
-                    )}
+                    <span>Требуется: {error.note}</span>
+                    {error.fix && <span className="summary__fix">Как исправить: {error.fix}</span>}
                   </li>
                 ))}
               </ul>
@@ -1157,126 +1122,235 @@ const App = () => {
         <div className="layout--primary__sidebar-stack">
         {activeResultTab === 'input-parameters' && renderResultTabs('layout--primary__tabs')}
         <form className="card form layout--primary__form" aria-label="Параметры лестницы">
-          <SimpleInputPanel form={form} onChange={handleSimpleInputChange} />
+          <div className="form__grid">
+            <label className="field">
+              <span className="field__label">Форма лестницы</span>
+              <select className="field__control" name="shape" onChange={handleShapeChange} value={form.shape}>
+                {SHAPES.map((shape) => (
+                  <option key={shape.value} value={shape.value}>
+                    {shape.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <details className="additional-params form__wide">
-            <summary className="additional-params__summary">Дополнительные параметры</summary>
-            <div className="additional-params__grid">
-              <label className="field">
-                <span className="field__label">Форма лестницы</span>
-                <select className="field__control" name="shape" onChange={handleShapeChange} value={form.shape}>
-                  {SHAPES.map((shape) => (
-                    <option key={shape.value} value={shape.value}>
-                      {shape.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <label className="field">
+              <span className="field__label">{renderParameterHeader('Высота подъема H, мм', PARAMETER_HINTS.height)}</span>
+              <input
+                className="field__control"
+                min="450"
+                name="height"
+                onChange={handleNumberChange}
+                type="number"
+                value={form.height}
+              />
+            </label>
 
+            <label className="field">
+              <span className="field__label">{renderParameterHeader('Количество этажей', PARAMETER_HINTS.floors)}</span>
+              <input
+                className="field__control"
+                min="2"
+                max="3"
+                name="floors"
+                onChange={handleNumberChange}
+                type="number"
+                value={form.floors}
+              />
+            </label>
+
+            {isFieldVisible(form.shape, 'flightWidth') && (
               <label className="field">
-                <span className="field__label">{renderParameterHeader('Количество этажей', PARAMETER_HINTS.floors)}</span>
+                <span className="field__label">{renderParameterHeader('Ширина марша, мм', PARAMETER_HINTS.flightWidth)}</span>
                 <input
                   className="field__control"
-                  min="2"
-                  max="3"
-                  name="floors"
+                  min="600"
+                  name="flightWidth"
                   onChange={handleNumberChange}
                   type="number"
-                  value={form.floors}
+                  value={form.flightWidth}
                 />
               </label>
+            )}
 
-              {isFieldVisible(form.shape, 'flightWidth') && (
-                <label className="field">
-                  <span className="field__label">{renderParameterHeader('Ширина марша, мм', PARAMETER_HINTS.flightWidth)}</span>
-                  <input
-                    className="field__control"
-                    min="600"
-                    name="flightWidth"
-                    onChange={handleNumberChange}
-                    type="number"
-                    value={form.flightWidth}
-                  />
-                </label>
-              )}
-
-              {isFieldVisible(form.shape, 'openingLength') && (
-                <label className="field">
-                  <span className="field__label">{renderParameterHeader('Длина проема / проекция L, мм', PARAMETER_HINTS.openingLength)}</span>
-                  <input
-                    className="field__control"
-                    min="600"
-                    name="openingLength"
-                    onChange={handleNumberChange}
-                    type="number"
-                    value={form.openingLength}
-                  />
-                </label>
-              )}
-
-              {canUseAutoSteps && (
-                <label className="field field--checkbox">
-                  <input checked={form.useAutoSteps} onChange={handleAutoStepsChange} type="checkbox" />
-                  <span>Авторасчет количества ступеней</span>
-                </label>
-              )}
-
+            {isFieldVisible(form.shape, 'openingLength') && (
               <label className="field">
-                <span className="field__label">{renderParameterHeader('Количество ступеней / подъемов n', PARAMETER_HINTS.steps)}</span>
+                <span className="field__label">{renderParameterHeader('Длина проема / проекция L, мм', PARAMETER_HINTS.openingLength)}</span>
                 <input
                   className="field__control"
-                  disabled={canUseAutoSteps && form.useAutoSteps}
-                  min="3"
-                  name="steps"
+                  min="600"
+                  name="openingLength"
                   onChange={handleNumberChange}
                   type="number"
-                  value={canUseAutoSteps && form.useAutoSteps ? geometry.safeSteps : form.steps}
+                  value={form.openingLength}
                 />
               </label>
+            )}
 
+            {canUseAutoSteps && (
+              <label className="field field--checkbox">
+                <input checked={form.useAutoSteps} onChange={handleAutoStepsChange} type="checkbox" />
+                <span>Авторасчет количества ступеней</span>
+              </label>
+            )}
+
+            <label className="field">
+              <span className="field__label">{renderParameterHeader('Количество ступеней / подъемов n', PARAMETER_HINTS.steps)}</span>
+              <input
+                className="field__control"
+                disabled={canUseAutoSteps && form.useAutoSteps}
+                min="3"
+                name="steps"
+                onChange={handleNumberChange}
+                type="number"
+                value={canUseAutoSteps && form.useAutoSteps ? geometry.safeSteps : form.steps}
+              />
+            </label>
+
+            {isFieldVisible(form.shape, 'landingLength') && (
               <label className="field">
-                <span className="field__label">{renderParameterHeader('Толщина ступеней W, мм', PARAMETER_HINTS.treadThickness)}</span>
+                <span className="field__label">{renderParameterHeader('Длина площадки, мм', PARAMETER_HINTS.landingLength)}</span>
                 <input
                   className="field__control"
-                  min="1"
-                  name="treadThickness"
+                  min={form.flightWidth}
+                  name="landingLength"
                   onChange={handleNumberChange}
                   type="number"
-                  value={form.treadThickness}
+                  value={form.landingLength}
                 />
               </label>
+            )}
 
+            {isFieldVisible(form.shape, 'firstFlightSteps') && geometry.flightCount === 2 && (
               <label className="field">
-                <span className="field__label">{renderParameterHeader('Свес проступи F, мм', PARAMETER_HINTS.treadOverhang)}</span>
+                <span className="field__label">{renderParameterHeader('Количество ступеней в 1-м марше', PARAMETER_HINTS.firstFlightSteps)}</span>
                 <input
-                  aria-describedby={form.treadOverhang > 50 ? 'tread-overhang-warning' : undefined}
                   className="field__control"
                   min="0"
-                  name="treadOverhang"
+                  name="firstFlightSteps"
                   onChange={handleNumberChange}
                   type="number"
-                  value={form.treadOverhang}
+                  value={form.firstFlightSteps}
                 />
-                {form.treadOverhang > 50 && (
-                  <span className="field__warning" id="tread-overhang-warning">⚠️ Свес более 50 мм не рекомендуется</span>
-                )}
               </label>
+            )}
 
+            {isFieldVisible(form.shape, 'secondFlightSteps') && geometry.flightCount === 2 && (
               <label className="field">
-                <span className="field__label">
-                  {renderParameterHeader(isSpiral ? 'Толщина центральной стойки T, мм' : 'Толщина тетивы / косоура T, мм', PARAMETER_HINTS.stringerThickness)}
-                </span>
+                <span className="field__label">{renderParameterHeader('Количество ступеней во 2-м марше', PARAMETER_HINTS.secondFlightSteps)}</span>
+                <input
+                  className="field__control"
+                  disabled={form.shape === 'l-platform' || form.shape === 'u-platform'}
+                  min="0"
+                  name="secondFlightSteps"
+                  onChange={handleNumberChange}
+                  type="number"
+                  value={form.shape.includes('platform') ? geometry.secondFlightSteps : form.secondFlightSteps}
+                />
+              </label>
+            )}
+
+            {isFieldVisible(form.shape, 'outerRadius') && (
+              <label className="field">
+                <span className="field__label">{renderParameterHeader('Внешний радиус R, мм', PARAMETER_HINTS.outerRadius)}</span>
+                <input
+                  className="field__control"
+                  min="800"
+                  name="outerRadius"
+                  onChange={handleNumberChange}
+                  type="number"
+                  value={form.outerRadius}
+                />
+              </label>
+            )}
+
+            {isFieldVisible(form.shape, 'innerRadius') && (
+              <label className="field">
+                <span className="field__label">{renderParameterHeader('Внутренний радиус r, мм', PARAMETER_HINTS.innerRadius)}</span>
+                <input
+                  className="field__control"
+                  min="100"
+                  name="innerRadius"
+                  onChange={handleNumberChange}
+                  type="number"
+                  value={form.innerRadius}
+                />
+              </label>
+            )}
+
+            {isFieldVisible(form.shape, 'spiralStepsPerTurn') && (
+              <label className="field">
+                <span className="field__label">{renderParameterHeader('Ступеней на полный оборот', PARAMETER_HINTS.spiralStepsPerTurn)}</span>
                 <input
                   className="field__control"
                   min="1"
-                  name="stringerThickness"
+                  name="spiralStepsPerTurn"
                   onChange={handleNumberChange}
                   type="number"
-                  value={form.stringerThickness}
+                  value={form.spiralStepsPerTurn}
                 />
               </label>
-            </div>
-          </details>
+            )}
+
+            <label className="field">
+              <span className="field__label">Материал</span>
+              <select className="field__control" name="material" onChange={handleSelectChange} value={form.material}>
+                {MATERIALS.map((material) => (
+                  <option key={material.value} value={material.value}>
+                    {material.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <details className="additional-params form__wide">
+              <summary className="additional-params__summary">Дополнительные параметры</summary>
+              <div className="additional-params__grid">
+                <label className="field">
+                  <span className="field__label">{renderParameterHeader('Толщина ступеней W, мм', PARAMETER_HINTS.treadThickness)}</span>
+                  <input
+                    className="field__control"
+                    min="1"
+                    name="treadThickness"
+                    onChange={handleNumberChange}
+                    type="number"
+                    value={form.treadThickness}
+                  />
+                </label>
+
+                <label className="field">
+                  <span className="field__label">{renderParameterHeader('Свес проступи F, мм', PARAMETER_HINTS.treadOverhang)}</span>
+                  <input
+                    aria-describedby={form.treadOverhang > 50 ? 'tread-overhang-warning' : undefined}
+                    className="field__control"
+                    min="0"
+                    name="treadOverhang"
+                    onChange={handleNumberChange}
+                    type="number"
+                    value={form.treadOverhang}
+                  />
+                  {form.treadOverhang > 50 && (
+                    <span className="field__warning" id="tread-overhang-warning">⚠️ Свес более 50 мм не рекомендуется</span>
+                  )}
+                </label>
+
+                <label className="field">
+                  <span className="field__label">
+                    {renderParameterHeader(isSpiral ? 'Толщина центральной стойки T, мм' : 'Толщина тетивы / косоура T, мм', PARAMETER_HINTS.stringerThickness)}
+                  </span>
+                  <input
+                    className="field__control"
+                    min="1"
+                    name="stringerThickness"
+                    onChange={handleNumberChange}
+                    type="number"
+                    value={form.stringerThickness}
+                  />
+                </label>
+              </div>
+            </details>
+
+          </div>
         </form>
         </div>
         </div>
